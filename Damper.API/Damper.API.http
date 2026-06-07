@@ -1,0 +1,6 @@
+@Damper.API_HostAddress = http://localhost:5187
+
+GET {{Damper.API_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

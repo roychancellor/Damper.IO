@@ -1,0 +1,7 @@
+<Solution>
+  <Project Path="Damper.API/Damper.API.csproj" />
+  <Project Path="Damper.Core/Damper.Core.csproj" />
+  <Project Path="Damper.Infrastructure/Damper.Infrastructure.csproj" />
+  <Project Path="Damper.Tests/Damper.Tests.csproj" />
+  <Project Path="Damper.Worker/Damper.Worker.csproj" />
+</Solution>

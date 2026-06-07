@@ -1,0 +1,27 @@
+# ==========================================
+# .NET Build and Output Artifacts
+# ==========================================
+[Bb]in/
+[Oo]bj/
+
+# Don't check in user-specific or machine-specific configs
+.vs/
+.vscode/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# ==========================================
+# Application Configurations & Logs
+# ==========================================
+# Exclude your local setup paths and generated runtime logs
+appsettings.json
+*.txt
+*.log
+
+# ==========================================
+# OS / IDE specific artifacts
+# ==========================================
+.DS_Store
+Thumbs.db
