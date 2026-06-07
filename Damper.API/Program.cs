@@ -10,18 +10,8 @@ var builder = WebApplication.CreateBuilder(args);
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 //builder.Services.AddOpenApi();
 
-// TODO: Move these service registrations into extension methods similar to Rabbit MQ
-builder.Services.AddMemoryCache();
-builder.Services.AddScoped<PostgreSqlCustomerRepository>();
-
-// 3. Register the decorator to intercept calls
-builder.Services.AddScoped<ICustomerRepository>(provider => 
-    new CachedCustomerRepository(
-        provider.GetRequiredService<PostgreSqlCustomerRepository>(),
-        provider.GetRequiredService<IMemoryCache>()
-    ));
+builder.Services.AddRepositories(builder.Configuration);
 builder.Services.AddScoped<IWebhookIngestionService, WebhookIngestionService>();
-
 await builder.Services.AddRabbitMqInfrastructureAsync(builder.Configuration);
 
 var app = builder.Build();
