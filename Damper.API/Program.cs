@@ -1,8 +1,5 @@
 using Damper.Core.IngestionService;
 using Damper.Infrastructure.Extensions;
-using Damper.Infrastructure.Repositories;
-using Microsoft.Extensions.Caching.Memory;
-using RabbitMQ.Client;
 
 var builder = WebApplication.CreateBuilder(args);
 
