@@ -1,8 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
-
 namespace Damper.Infrastructure.Repositories
 {
     public class CustomerConfig
@@ -10,5 +5,8 @@ namespace Damper.Infrastructure.Repositories
         public string CustomerId { get; set; } = "";
         public string SecretKey { get; set; } = "";
         public string WebhookHeaderKey { get; set; } = "";
+        public string DestinationURL { get; set; } = "";
+        public int DeliveryRate { get; set; }
+        public int DeliveryIntervalMillis { get; set; }
     }
 }

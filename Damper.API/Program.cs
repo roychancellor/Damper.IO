@@ -10,6 +10,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddRepositories(builder.Configuration);
 builder.Services.AddScoped<IWebhookIngestionService, WebhookIngestionService>();
 await builder.Services.AddRabbitMqInfrastructureAsync(builder.Configuration);
+builder.Services.AddQueuePublishing();
 
 var app = builder.Build();
 

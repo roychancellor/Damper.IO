@@ -17,16 +17,9 @@ namespace Damper.Infrastructure.Extensions
                 HostName = hostName 
             };
 
-            // 1. Initialize and register the single, long-lived TCP connection
+            // Initialize and register the single, long-lived TCP connection
             IConnection connection = await connectionFactory.CreateConnectionAsync();
             services.AddSingleton(connection);
-
-            // 2. Register the thread-isolated, short-lived channel factory per request
-            services.AddScoped(async provider =>
-            {
-                var conn = provider.GetRequiredService<IConnection>();
-                return await conn.CreateChannelAsync();
-            });
 
             return services;
         }

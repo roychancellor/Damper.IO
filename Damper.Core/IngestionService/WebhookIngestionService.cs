@@ -1,20 +1,23 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Damper.Infrastructure.Repositories;
 using Microsoft.AspNetCore.Http;
 using RabbitMQ.Client;
+using Damper.Infrastructure.QueueManagement;
+using Damper.Core.Models;
 
 namespace Damper.Core.IngestionService;
 
 public class WebhookIngestionService : IWebhookIngestionService
 {
     private readonly ICustomerRepository _customerRepo;
-    private readonly IChannel _rabbitChannel;
+    private readonly IQueuePublisher _queuePublisher;
 
-    public WebhookIngestionService(ICustomerRepository tenantRepo, IChannel rabbitChannel)
+    public WebhookIngestionService(ICustomerRepository tenantRepo, IQueuePublisher queuePublisher)
     {
         _customerRepo = tenantRepo;
-        _rabbitChannel = rabbitChannel;
+        _queuePublisher = queuePublisher;
     }
 
     public async Task<bool> ProcessIngressAsync(string customerId, IHeaderDictionary httpHeaders, Stream requestBody)
@@ -34,29 +37,11 @@ public class WebhookIngestionService : IWebhookIngestionService
             return false;
         }
 
-        // Push straight to the RabbitMQ Shard/Exchange
-        var bodyBytes = Encoding.UTF8.GetBytes(rawPayload);
-        
-        // Modern v7+ Properties Setup: Flawless async delivery tracking
-        var properties = new BasicProperties
-        {
-            DeliveryMode = DeliveryModes.Persistent, // Equivalent to old Persistent = true
-            Headers = new Dictionary<string, object?>
-            {
-                { "CustomerId", customerId }
-            }
-        };
+        var toPublish = WebhookEnvelope.BuildToPublish(customerId, customerConfig.DestinationURL, rawPayload);
+        var toPublishStr = JsonSerializer.Serialize(toPublish);
 
-        // Modern v7+ async publishing pattern
-        await _rabbitChannel.BasicPublishAsync(
-            exchange: "damper.webhook.exchange",
-            routingKey: $"webhook.shard.{customerId}",
-            mandatory: true,
-            basicProperties: properties,
-            body: bodyBytes
-        );
-
-        return true;
+        var isPublishSuccessful = await _queuePublisher.PublishAsync(customerId, toPublishStr);
+        return isPublishSuccessful;
     }
 
     private static bool VerifyHmacSignature(string payload, string incomingSignature, string secretKey)
