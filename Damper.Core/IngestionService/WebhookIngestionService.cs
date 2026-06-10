@@ -1,9 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
 using Damper.Infrastructure.Repositories;
 using Microsoft.AspNetCore.Http;
-using RabbitMQ.Client;
 using Damper.Infrastructure.QueueManagement;
 using Damper.Core.Models;
 
@@ -20,28 +18,48 @@ public class WebhookIngestionService : IWebhookIngestionService
         _queuePublisher = queuePublisher;
     }
 
-    public async Task<bool> ProcessIngressAsync(string customerId, IHeaderDictionary httpHeaders, Stream requestBody)
+    public async Task<Result<string>> ProcessIngressAsync(string customerId, IHeaderDictionary httpHeaders, Stream requestBody)
     {
         var customerConfig = await _customerRepo.GetByIdAsync(customerId);
-        if (customerConfig == null) return false;
+        if (customerConfig == null)
+        {
+            return Result<string>.Failure(ErrorType.ServerError, $"Customer configuration for '{customerId}' is missing or corrupted.");
+        }
 
         string? incomingSignature = httpHeaders[customerConfig.WebhookHeaderKey];
-        if (string.IsNullOrEmpty(incomingSignature)) return false;
+        if (string.IsNullOrEmpty(incomingSignature))
+        {
+            return Result<string>.Failure(ErrorType.BadRequest, "The incoming webhook header key cannot be null or empty");
+        }
         
         using var reader = new StreamReader(requestBody);
         string rawPayload = await reader.ReadToEndAsync();
-        if (string.IsNullOrEmpty(rawPayload)) return false;
+        if (string.IsNullOrEmpty(rawPayload))
+        {
+            return Result<string>.Failure(ErrorType.BadRequest, "The incoming webhook payload cannot be null or empty");
+        }
 
         if (!VerifyHmacSignature(rawPayload, incomingSignature, customerConfig.SecretKey))
         {
-            return false;
+            return Result<string>.Failure(ErrorType.BadRequest, "The incoming webhook payload hash does not match the incoming signature");
         }
 
-        var toPublish = WebhookEnvelope.BuildToPublish(customerId, customerConfig.DestinationURL, rawPayload);
-        var toPublishStr = JsonSerializer.Serialize(toPublish);
+        var toPublishStr = WebhookEnvelope.BuildToPublish(customerId, customerConfig.DestinationURL, rawPayload)
+                                          .Jsonify();
+        if (string.IsNullOrEmpty(toPublishStr))
+        {
+            return Result<string>.Failure(ErrorType.BadRequest, "Unable to serialize the ingested webhook payload");
+        }
 
         var isPublishSuccessful = await _queuePublisher.PublishAsync(customerId, toPublishStr);
-        return isPublishSuccessful;
+        if (!isPublishSuccessful)
+        {
+            return Result<string>.Failure(ErrorType.ServerError, "Unable to publish ingested webhook payload to message broker");
+        }
+
+        // Success! Return a tracking ID back to the API
+        string trackingId = Guid.NewGuid().ToString("N");
+        return Result<string>.Success(trackingId);
     }
 
     private static bool VerifyHmacSignature(string payload, string incomingSignature, string secretKey)

@@ -1,8 +1,9 @@
 ﻿using Microsoft.AspNetCore.Http;
+using Damper.Core.Models;
 
 namespace Damper.Core.IngestionService;
 
 public interface IWebhookIngestionService
 {
-    Task<bool> ProcessIngressAsync(string customerId, IHeaderDictionary httpHeaders, Stream requestBody);
+    Task<Result<string>> ProcessIngressAsync(string customerId, IHeaderDictionary httpHeaders, Stream requestBody);
 }

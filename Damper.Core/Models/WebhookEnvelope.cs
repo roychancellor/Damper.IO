@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace Damper.Core.Models
 {
     public class WebhookEnvelope
@@ -20,6 +22,19 @@ namespace Damper.Core.Models
                 DestinationUrl = destinationURL,
                 RawBody = rawBody,
             };
+        }
+
+        public string Jsonify()
+        {
+            try
+            {
+                var toReturn = JsonSerializer.Serialize(this);
+                return toReturn;
+            }
+            catch (Exception)
+            {
+                return string.Empty;
+            }
         }
     }
 }
