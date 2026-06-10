@@ -1,37 +1,62 @@
 using Damper.Core.IngestionService;
 using Damper.Core.Models;
 using Damper.Infrastructure.Extensions;
+using Damper.Infrastructure.Logging;
+using NLog.Web;
+using NLog;
 
-var builder = WebApplication.CreateBuilder(args);
+var bootstrapLogger = LogManager.Setup().GetCurrentClassLogger();
 
-builder.Services.AddRepositories(builder.Configuration);
-builder.Services.AddScoped<IWebhookIngestionService, WebhookIngestionService>();
-await builder.Services.AddRabbitMqInfrastructureAsync(builder.Configuration);
-builder.Services.AddQueuePublishing();
-
-var app = builder.Build();
-
-// Configure the HTTP request pipeline.
-app.UseHttpsRedirection();
-
-app.MapPost("v1/inbound/{customerId}", async (
-    string customerId, 
-    HttpRequest request, 
-    IWebhookIngestionService ingestionService) =>
+try
 {
-    var result = await ingestionService.ProcessIngressAsync(customerId, request.Headers, request.Body);
-    
-    return result.IsSuccess
-        ? Results.Accepted($"/v1/status/{result.Value}", new { trackingId = result.Value })
-        : result.Error.Type switch
-        {
-            ErrorType.BadRequest  => Results.BadRequest(new { error = result.Error.Message }),
-            ErrorType.NotFound    => Results.NotFound(new { error = result.Error.Message }),
-            ErrorType.ServerError => TypedResults.Json(new { error = "An internal processing error occurred." }, 
-                                                       statusCode: StatusCodes.Status500InternalServerError),
-            _                     => TypedResults.Json(new { error = "Unknown error occurred" },
-                                                       statusCode: StatusCodes.Status500InternalServerError)
-        };
-});
+    bootstrapLogger.Info($"DAMPER.IO APPLICATION STARTING");
 
-app.Run();
+    var builder = WebApplication.CreateBuilder(args);
+    
+    builder.Logging.ClearProviders();
+    builder.Host.UseNLog();
+    
+    builder.Services.AddRepositories(builder.Configuration);
+    builder.Services.AddScoped<IWebhookIngestionService, WebhookIngestionService>();
+    await builder.Services.AddRabbitMqInfrastructureAsync(builder.Configuration);
+    builder.Services.AddQueuePublishing();
+    
+    var app = builder.Build();
+    
+    var loggerFactory = app.Services.GetRequiredService<ILoggerFactory>();
+    Loggers.Initialize(loggerFactory);
+    
+    // Configure the HTTP request pipeline.
+    app.UseHttpsRedirection();
+    
+    app.MapPost("v1/inbound/{customerId}", async (
+        string customerId, 
+        HttpRequest request, 
+        IWebhookIngestionService ingestionService) =>
+    {
+        var result = await ingestionService.ProcessIngressAsync(customerId, request.Headers, request.Body);
+        
+        return result.IsSuccess
+            ? Results.Accepted($"/v1/status/{result.Value}", new { trackingId = result.Value })
+            : result.Error.Type switch
+            {
+                ErrorType.BadRequest  => Results.BadRequest(new { error = result.Error.Message }),
+                ErrorType.NotFound    => Results.NotFound(new { error = result.Error.Message }),
+                ErrorType.ServerError => TypedResults.Json(new { error = "An internal processing error occurred." }, 
+                                                           statusCode: StatusCodes.Status500InternalServerError),
+                _                     => TypedResults.Json(new { error = "Unknown error occurred" },
+                                                           statusCode: StatusCodes.Status500InternalServerError)
+            };
+    });
+    
+    app.Run();
+}
+catch (Exception ex)
+{
+    bootstrapLogger.Fatal(ex, "Damper.io terminated unexpectedly");
+    throw;
+}
+finally
+{
+    LogManager.Shutdown();
+}
