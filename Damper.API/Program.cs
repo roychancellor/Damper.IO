@@ -1,5 +1,7 @@
 using Damper.Core.IngestionService;
+using Damper.Core.Middleware;
 using Damper.Core.Models;
+using Damper.Core.Utilities;
 using Damper.Infrastructure.Extensions;
 using Damper.Infrastructure.Logging;
 using NLog.Web;
@@ -25,16 +27,20 @@ try
     
     var loggerFactory = app.Services.GetRequiredService<ILoggerFactory>();
     Loggers.Initialize(loggerFactory);
+
+    app.UseMiddleware<CorrelationIdMiddleware>();
     
     // Configure the HTTP request pipeline.
     app.UseHttpsRedirection();
     
     app.MapPost("v1/inbound/{customerId}", async (
         string customerId, 
-        HttpRequest request, 
+        HttpContext context,
         IWebhookIngestionService ingestionService) =>
     {
-        var result = await ingestionService.ProcessIngressAsync(customerId, request.Headers, request.Body);
+        // Middleware creates the correlation ID and puts it in the HttpContext.Items dictionary
+        var correlationId = context.Items["CorrelationId"]?.ToString() ?? $"SYSGEN-{CorrelationIdGenerator.Generate()}";
+        var result = await ingestionService.ProcessIngressAsync(correlationId, customerId, context.Request.Headers, context.Request.Body);
         
         return result.IsSuccess
             ? Results.Accepted($"/v1/status/{result.Value}", new { trackingId = result.Value })

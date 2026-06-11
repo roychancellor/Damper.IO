@@ -5,5 +5,5 @@ namespace Damper.Core.IngestionService;
 
 public interface IWebhookIngestionService
 {
-    Task<Result<string>> ProcessIngressAsync(string customerId, IHeaderDictionary httpHeaders, Stream requestBody);
+    Task<Result<string>> ProcessIngressAsync(string correlationId, string customerId, IHeaderDictionary httpHeaders, Stream requestBody);
 }

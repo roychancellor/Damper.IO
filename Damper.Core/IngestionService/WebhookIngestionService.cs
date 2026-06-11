@@ -2,13 +2,17 @@ using System.Security.Cryptography;
 using System.Text;
 using Damper.Infrastructure.Repositories;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
 using Damper.Infrastructure.QueueManagement;
 using Damper.Core.Models;
+using Damper.Infrastructure.Logging;
 
 namespace Damper.Core.IngestionService;
 
 public class WebhookIngestionService : IWebhookIngestionService
 {
+    private static readonly ILogger _log = Loggers.Request;
+    
     private readonly ICustomerRepository _customerRepo;
     private readonly IQueuePublisher _queuePublisher;
 
@@ -18,46 +22,62 @@ public class WebhookIngestionService : IWebhookIngestionService
         _queuePublisher = queuePublisher;
     }
 
-    public async Task<Result<string>> ProcessIngressAsync(string customerId, IHeaderDictionary httpHeaders, Stream requestBody)
+    public async Task<Result<string>> ProcessIngressAsync(string correlationId, string customerId, IHeaderDictionary httpHeaders, Stream requestBody)
     {
+        string msg;
+        
+        _log.Info($"====> New webhook request received | CUSTOMER: {customerId}");
         var customerConfig = await _customerRepo.GetByIdAsync(customerId);
         if (customerConfig == null)
         {
-            return Result<string>.Failure(ErrorType.ServerError, $"Customer configuration for '{customerId}' is missing or corrupted.");
+            msg = $"Customer configuration for '{customerId}' is missing or corrupted.";
+            _log.Error(msg);
+            return Result<string>.Failure(ErrorType.ServerError, msg);
         }
 
         string? incomingSignature = httpHeaders[customerConfig.WebhookHeaderKey];
         if (string.IsNullOrEmpty(incomingSignature))
         {
-            return Result<string>.Failure(ErrorType.BadRequest, "The incoming webhook header key cannot be null or empty");
+            msg = "The incoming webhook header key cannot be null or empty";
+            _log.Error(msg);
+            return Result<string>.Failure(ErrorType.BadRequest, msg);
         }
         
         using var reader = new StreamReader(requestBody);
         string rawPayload = await reader.ReadToEndAsync();
         if (string.IsNullOrEmpty(rawPayload))
         {
-            return Result<string>.Failure(ErrorType.BadRequest, "The incoming webhook payload cannot be null or empty");
+            msg = "The incoming webhook payload cannot be null or empty";
+            _log.Error(msg);
+            return Result<string>.Failure(ErrorType.BadRequest, msg);
         }
 
         if (!VerifyHmacSignature(rawPayload, incomingSignature, customerConfig.SecretKey))
         {
-            return Result<string>.Failure(ErrorType.BadRequest, "The incoming webhook payload hash does not match the incoming signature");
+            msg = "The incoming webhook payload hash does not match the incoming signature";
+            _log.Error(msg);
+            return Result<string>.Failure(ErrorType.BadRequest, msg);
         }
 
-        var toPublishStr = WebhookEnvelope.BuildToPublish(customerId, customerConfig.DestinationURL, rawPayload)
+        var toPublishStr = WebhookEnvelope.BuildToPublish(correlationId, customerId, customerConfig.DestinationURL, rawPayload)
                                           .Jsonify();
         if (string.IsNullOrEmpty(toPublishStr))
         {
-            return Result<string>.Failure(ErrorType.BadRequest, "Unable to serialize the ingested webhook payload");
+            msg = "Unable to serialize the ingested webhook payload";
+            _log.Error(msg);
+            return Result<string>.Failure(ErrorType.BadRequest, msg);
         }
 
         var isPublishSuccessful = await _queuePublisher.PublishAsync(customerId, toPublishStr);
         if (!isPublishSuccessful)
         {
-            return Result<string>.Failure(ErrorType.ServerError, "Unable to publish ingested webhook payload to message broker");
+            msg = "Unable to publish ingested webhook payload to message broker";
+            _log.Error(msg);
+            return Result<string>.Failure(ErrorType.ServerError, msg);
         }
 
         // Success! Return a tracking ID back to the API
+        _log.Info($"<==== Webhook request processed | CUSTOMER: {customerId}");
         string trackingId = Guid.NewGuid().ToString("N");
         return Result<string>.Success(trackingId);
     }
