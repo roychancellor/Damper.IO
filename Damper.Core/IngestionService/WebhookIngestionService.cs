@@ -24,62 +24,53 @@ public class WebhookIngestionService : IWebhookIngestionService
 
     public async Task<Result<string>> ProcessIngressAsync(string correlationId, string customerId, IHeaderDictionary httpHeaders, Stream requestBody)
     {
-        string msg;
-        
         _log.Info($"====> New webhook request received | CUSTOMER: {customerId}");
         var customerConfig = await _customerRepo.GetByIdAsync(customerId);
         if (customerConfig == null)
         {
-            msg = $"Customer configuration for '{customerId}' is missing or corrupted.";
-            _log.Error(msg);
-            return Result<string>.Failure(ErrorType.ServerError, msg);
+            return LogAndGenerateFailureResult(customerId, $"Customer configuration for '{customerId}' is missing or corrupted.", ErrorType.ServerError);
         }
 
         string? incomingSignature = httpHeaders[customerConfig.WebhookHeaderKey];
         if (string.IsNullOrEmpty(incomingSignature))
         {
-            msg = "The incoming webhook header key cannot be null or empty";
-            _log.Error(msg);
-            return Result<string>.Failure(ErrorType.BadRequest, msg);
+            return LogAndGenerateFailureResult(customerId, "The incoming webhook header key cannot be null or empty", ErrorType.BadRequest);
         }
         
         using var reader = new StreamReader(requestBody);
         string rawPayload = await reader.ReadToEndAsync();
         if (string.IsNullOrEmpty(rawPayload))
         {
-            msg = "The incoming webhook payload cannot be null or empty";
-            _log.Error(msg);
-            return Result<string>.Failure(ErrorType.BadRequest, msg);
+            return LogAndGenerateFailureResult(customerId, "The incoming webhook payload cannot be null or empty", ErrorType.BadRequest);
         }
 
         if (!VerifyHmacSignature(rawPayload, incomingSignature, customerConfig.SecretKey))
         {
-            msg = "The incoming webhook payload hash does not match the incoming signature";
-            _log.Error(msg);
-            return Result<string>.Failure(ErrorType.BadRequest, msg);
+            return LogAndGenerateFailureResult(customerId, "The incoming webhook payload hash does not match the incoming signature", ErrorType.BadRequest);
         }
 
         var toPublishStr = WebhookEnvelope.BuildToPublish(correlationId, customerId, customerConfig.DestinationURL, rawPayload)
                                           .Jsonify();
         if (string.IsNullOrEmpty(toPublishStr))
         {
-            msg = "Unable to serialize the ingested webhook payload";
-            _log.Error(msg);
-            return Result<string>.Failure(ErrorType.BadRequest, msg);
+            return LogAndGenerateFailureResult(customerId, "Unable to serialize the ingested webhook payload", ErrorType.BadRequest);
         }
 
         var isPublishSuccessful = await _queuePublisher.PublishAsync(customerId, toPublishStr);
         if (!isPublishSuccessful)
         {
-            msg = "Unable to publish ingested webhook payload to message broker";
-            _log.Error(msg);
-            return Result<string>.Failure(ErrorType.ServerError, msg);
+            return LogAndGenerateFailureResult(customerId, "Unable to publish ingested webhook payload to message broker", ErrorType.ServerError);
         }
 
         // Success! Return a tracking ID back to the API
         _log.Info($"<==== Webhook request processed | CUSTOMER: {customerId}");
-        string trackingId = Guid.NewGuid().ToString("N");
-        return Result<string>.Success(trackingId);
+        return Result<string>.Success(correlationId);
+    }
+
+    private Result<string> LogAndGenerateFailureResult(string customerId, string msg, ErrorType errorType)
+    {
+        _log.Error(msg);
+        return Result<string>.Failure(errorType, msg);
     }
 
     private static bool VerifyHmacSignature(string payload, string incomingSignature, string secretKey)
