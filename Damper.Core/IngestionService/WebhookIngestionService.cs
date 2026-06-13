@@ -94,16 +94,31 @@ public class WebhookIngestionService : IWebhookIngestionService
 
     private static bool VerifyHmacSignature(string payload, string incomingSignature, string secretKey)
     {
+        // Defend against null or obviously malformed signatures immediately
+        if (string.IsNullOrEmpty(incomingSignature) || incomingSignature.Length != 64)
+        {
+            return false;
+        }
+
+        // Convert incoming hex string straight to bytes without string allocations
+        byte[] incomingBytes;
+        try
+        {
+            incomingBytes = Convert.FromHexString(incomingSignature);
+        }
+        catch (FormatException)
+        {
+            return false; // Not a valid hex string
+        }
+
+        // Compute the native hash
         var keyBytes = Encoding.UTF8.GetBytes(secretKey);
         var payloadBytes = Encoding.UTF8.GetBytes(payload);
 
         using var hmac = new HMACSHA256(keyBytes);
         var computedHashBytes = hmac.ComputeHash(payloadBytes);
-        var computedSignature = Convert.ToHexString(computedHashBytes).ToLowerInvariant();
 
-        return CryptographicOperations.FixedTimeEquals(
-            Encoding.UTF8.GetBytes(computedSignature), 
-            Encoding.UTF8.GetBytes(incomingSignature)
-        );
+        // Compare the two native byte arrays directly in constant time
+        return CryptographicOperations.FixedTimeEquals(computedHashBytes, incomingBytes);
     }
 }

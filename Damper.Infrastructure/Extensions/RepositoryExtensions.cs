@@ -10,6 +10,7 @@ namespace Damper.Infrastructure.Extensions
         {
             services.AddMemoryCache();
             services.AddScoped<PostgreSqlCustomerRepository>();
+            services.AddScoped<FileSystemCustomerRepository>();
 
             // Register the decorator to intercept calls
             services.AddScoped<ICustomerRepository>(provider => 
