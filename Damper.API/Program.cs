@@ -36,11 +36,12 @@ try
     app.MapPost("v1/inbound/{customerId}", async (
         string customerId, 
         HttpContext context,
-        IWebhookIngestionService ingestionService) =>
+        IWebhookIngestionService ingestionService,
+        CancellationToken ct) =>
     {
         // Middleware creates the correlation ID and puts it in the HttpContext.Items dictionary
         var correlationId = context.Items["CorrelationId"]?.ToString() ?? $"SYSGEN-{CorrelationIdGenerator.Generate()}";
-        var result = await ingestionService.ProcessIngressAsync(correlationId, customerId, context.Request.Headers, context.Request.Body);
+        var result = await ingestionService.ProcessIngressAsync(correlationId, customerId, context.Request.Headers, context.Request.Body, ct);
         
         return result.IsSuccess
             ? Results.Accepted($"/v1/status/{result.Value}", new { trackingId = result.Value })

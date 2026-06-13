@@ -3,6 +3,7 @@ using System.Text;
 using Damper.Infrastructure.Repositories;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Hosting;
 using Damper.Infrastructure.QueueManagement;
 using Damper.Core.Models;
 using Damper.Infrastructure.Logging;
@@ -12,20 +13,26 @@ namespace Damper.Core.IngestionService;
 public class WebhookIngestionService : IWebhookIngestionService
 {
     private static readonly ILogger _log = Loggers.Request;
+    private readonly IHostApplicationLifetime _appLifetime;
     
     private readonly ICustomerRepository _customerRepo;
     private readonly IQueuePublisher _queuePublisher;
 
-    public WebhookIngestionService(ICustomerRepository tenantRepo, IQueuePublisher queuePublisher)
+    public WebhookIngestionService(ICustomerRepository tenantRepo, IQueuePublisher queuePublisher, IHostApplicationLifetime appLifetime)
     {
         _customerRepo = tenantRepo;
         _queuePublisher = queuePublisher;
+        _appLifetime = appLifetime;
     }
 
-    public async Task<Result<string>> ProcessIngressAsync(string correlationId, string customerId, IHeaderDictionary httpHeaders, Stream requestBody)
+    public async Task<Result<string>> ProcessIngressAsync(string correlationId,
+                                                          string customerId,
+                                                          IHeaderDictionary httpHeaders,
+                                                          Stream requestBody,
+                                                          CancellationToken ct)
     {
         _log.Info($"====> New webhook request received | CUSTOMER: {customerId}");
-        var customerConfig = await _customerRepo.GetByIdAsync(customerId);
+        var customerConfig = await _customerRepo.GetByIdAsync(customerId, ct);
         if (customerConfig == null)
         {
             return LogAndGenerateFailureResult(customerId, $"Customer configuration for '{customerId}' is missing or corrupted.", ErrorType.ServerError);
@@ -38,7 +45,7 @@ public class WebhookIngestionService : IWebhookIngestionService
         }
         
         using var reader = new StreamReader(requestBody);
-        string rawPayload = await reader.ReadToEndAsync();
+        string rawPayload = await reader.ReadToEndAsync(ct);
         if (string.IsNullOrEmpty(rawPayload))
         {
             return LogAndGenerateFailureResult(customerId, "The incoming webhook payload cannot be null or empty", ErrorType.BadRequest);
@@ -56,10 +63,22 @@ public class WebhookIngestionService : IWebhookIngestionService
             return LogAndGenerateFailureResult(customerId, "Unable to serialize the ingested webhook payload", ErrorType.BadRequest);
         }
 
-        var isPublishSuccessful = await _queuePublisher.PublishAsync(customerId, toPublishStr);
-        if (!isPublishSuccessful)
+        // By business decision, we are passing a combined token that will prevent publishing if the HTTP request
+        // is canceled OR if the application shuts down. In either case, the webhook providers will not receive
+        // a success status code and will retry.
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, _appLifetime.ApplicationStopping);
+        try
         {
-            return LogAndGenerateFailureResult(customerId, "Unable to publish ingested webhook payload to message broker", ErrorType.ServerError);
+            var isPublishSuccessful = await _queuePublisher.PublishAsync(customerId, toPublishStr, linkedCts.Token);
+            if (!isPublishSuccessful)
+            {
+                return LogAndGenerateFailureResult(customerId, "Unable to publish ingested webhook payload to message broker", ErrorType.ServerError);
+            }
+        }
+        catch (OperationCanceledException) when (_appLifetime.ApplicationStopping.IsCancellationRequested)
+        {
+            _log.Warn($"Publish aborted for customer {customerId} due to application shutdown sequence.");
+            throw;
         }
 
         // Success! Return a tracking ID back to the API

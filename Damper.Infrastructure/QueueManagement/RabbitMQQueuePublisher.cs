@@ -13,7 +13,7 @@ namespace Damper.Infrastructure.QueueManagement
             _rabbitConnection = rabbitConnection ?? throw new ArgumentNullException(nameof(rabbitConnection));
         }
 
-    public async Task<bool> PublishAsync(string customerId, string toPublish)
+    public async Task<bool> PublishAsync(string customerId, string toPublish, CancellationToken ct)
         {
             try
             {
@@ -40,7 +40,8 @@ namespace Damper.Infrastructure.QueueManagement
                     routingKey: $"webhook.shard.{customerId}",
                     mandatory: true,
                     basicProperties: properties,
-                    body: bodyBytes
+                    body: bodyBytes,
+                    cancellationToken: ct
                 );
                 return true;
             }

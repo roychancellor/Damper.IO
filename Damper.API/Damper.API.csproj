@@ -12,4 +12,9 @@
     <ProjectReference Include="..\Damper.Core\Damper.Core.csproj" />
     <ProjectReference Include="..\Damper.Infrastructure\Damper.Infrastructure.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <None Update="nlog.config">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
 </Project>

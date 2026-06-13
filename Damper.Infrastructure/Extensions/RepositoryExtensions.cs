@@ -2,7 +2,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Configuration;
 using Damper.Infrastructure.Repositories;
 using Microsoft.Extensions.Caching.Memory;
-
 namespace Damper.Infrastructure.Extensions
 {
     public static class RepositoryExtensions
@@ -15,7 +14,8 @@ namespace Damper.Infrastructure.Extensions
             // Register the decorator to intercept calls
             services.AddScoped<ICustomerRepository>(provider => 
                 new CachedCustomerRepository(
-                    provider.GetRequiredService<PostgreSqlCustomerRepository>(),
+                    //provider.GetRequiredService<PostgreSqlCustomerRepository>(),
+                    provider.GetRequiredService<FileSystemCustomerRepository>(),
                     provider.GetRequiredService<IMemoryCache>()
                 ));
             return services;
