@@ -16,7 +16,7 @@
 # Application Configurations & Logs
 # ==========================================
 # Exclude your local setup paths and generated runtime logs
-appsettings.json
+appsettings.Development.json
 *.txt
 *.log
 

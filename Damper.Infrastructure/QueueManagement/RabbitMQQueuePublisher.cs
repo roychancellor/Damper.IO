@@ -1,3 +1,5 @@
+using Damper.Infrastructure.ReferenceData;
+using Microsoft.Extensions.Options;
 using RabbitMQ.Client;
 using System.Text;
 
@@ -8,13 +10,13 @@ namespace Damper.Infrastructure.QueueManagement
         private IConnection _connection;
         private IChannel? _channel;
         private readonly SemaphoreSlim _channelSemaphore = new(1, 1);
-        private readonly string _exchangeName;
         private bool _disposed;
+        private IOptionsMonitor<AppRefData> _appOptMon;
 
-        public RabbitMQQueuePublisher(IConnection connection, string exchangeName)
+        public RabbitMQQueuePublisher(IConnection connection, IOptionsMonitor<AppRefData> appOptMon)
         {
             _connection = connection ?? throw new ArgumentNullException(nameof(connection));
-            _exchangeName = exchangeName;
+            _appOptMon = appOptMon;
         }
 
         public async Task<bool> PublishAsync(PublishWrapper pw)
@@ -57,7 +59,7 @@ namespace Damper.Infrastructure.QueueManagement
     
                 // Modern v7+ async publishing pattern
                 await _channel.BasicPublishAsync(
-                    exchange: _exchangeName,
+                    exchange: _appOptMon.CurrentValue.RabbitMqData.ExchangeName,
                     routingKey: pw.CustomerId,
                     mandatory: true,
                     basicProperties: properties,
