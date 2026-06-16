@@ -21,7 +21,7 @@ public class CorrelationIdMiddleware
         // Check if the calling system already sent a Tracking ID in the Request Headers
         if (!context.Request.Headers.TryGetValue("X-Correlation-ID", out var correlationId))
         {
-            // If not, generate your cryptographically secure 10-character token
+            // If not, generate a cryptographically secure 10-character token
             correlationId = CorrelationIdGenerator.Generate();
             
             // Inject it into the Request Headers so downstream pieces see it natively
