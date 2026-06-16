@@ -41,7 +41,8 @@ try
     {
         // Middleware creates the correlation ID and puts it in the HttpContext.Items dictionary
         var correlationId = context.Items["CorrelationId"]?.ToString() ?? $"SYSGEN-{CorrelationIdGenerator.Generate()}";
-        var result = await ingestionService.ProcessIngressAsync(correlationId, customerId, context.Request.Headers, context.Request.Body, ct);
+        var thisRequest = RequestWrapper.BuildFrom(correlationId, customerId, context.Request.Headers, context.Request.Body, ct);
+        var result = await ingestionService.ProcessIngressAsync(thisRequest);
         
         return result.IsSuccess
             ? Results.Accepted($"/v1/status/{result.Value}", new { trackingId = result.Value })
