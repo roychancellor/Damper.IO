@@ -1,12 +1,11 @@
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Configuration;
 using Damper.Infrastructure.Repositories;
 using Microsoft.Extensions.Caching.Memory;
 namespace Damper.Infrastructure.Extensions
 {
     public static class RepositoryExtensions
     {
-        public static IServiceCollection AddRepositories(this IServiceCollection services, IConfiguration configuration)
+        public static IServiceCollection AddRepositories(this IServiceCollection services)
         {
             services.AddMemoryCache();
             services.AddScoped<PostgreSqlCustomerRepository>();

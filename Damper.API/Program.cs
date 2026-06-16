@@ -6,6 +6,8 @@ using Damper.Infrastructure.Extensions;
 using Damper.Infrastructure.Logging;
 using NLog.Web;
 using NLog;
+using Damper.Infrastructure.ReferenceData;
+using Microsoft.Extensions.Options;
 
 var bootstrapLogger = LogManager.Setup().GetCurrentClassLogger();
 
@@ -14,14 +16,16 @@ try
     bootstrapLogger.Info($"DAMPER.IO APPLICATION STARTING");
 
     var builder = WebApplication.CreateBuilder(args);
+
+    builder.Services.Configure<AppRefData>(builder.Configuration.GetSection("ApplicationData"));
     
     builder.Logging.ClearProviders();
     builder.Host.UseNLog();
     
-    builder.Services.AddRepositories(builder.Configuration);
-    builder.Services.AddScoped<IWebhookIngestionService, WebhookIngestionService>();
-    await builder.Services.AddRabbitMqInfrastructureAsync(builder.Configuration);
-    builder.Services.AddQueuePublishing();
+    builder.Services.AddRepositories()
+                    .AddRabbitMqInfrastructure()
+                    .AddQueuePublishing()
+                    .AddWebhookIngestion();
     
     var app = builder.Build();
     
