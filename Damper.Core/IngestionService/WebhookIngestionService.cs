@@ -69,7 +69,7 @@ public class WebhookIngestionService : IWebhookIngestionService
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, _appLifetime.ApplicationStopping);
         try
         {
-            var isPublishSuccessful = await _queuePublisher.PublishAsync(customerId, toPublishStr, linkedCts.Token);
+            var isPublishSuccessful = await _queuePublisher.PublishAsync(correlationId, customerId, toPublishStr, linkedCts.Token, shouldThrow: false);
             if (!isPublishSuccessful)
             {
                 return LogAndGenerateFailureResult(customerId, "Unable to publish ingested webhook payload to message broker", ErrorType.ServerError);
