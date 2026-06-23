@@ -1,4 +1,6 @@
+using Damper.Infrastructure.Logging;
 using Damper.Infrastructure.ReferenceData;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using RabbitMQ.Client;
 using System.Text;
@@ -7,6 +9,7 @@ namespace Damper.Infrastructure.QueueManagement
 {
     public class RabbitMQQueuePublisher : IQueuePublisher, IDisposable
     {
+        private static ILogger _traceLog = Loggers.RequestTrace;
         private IConnection _connection;
         private IChannel? _channel;
         private readonly SemaphoreSlim _channelSemaphore = new(1, 1);
@@ -23,27 +26,42 @@ namespace Damper.Infrastructure.QueueManagement
         {
             try
             {
-                if (string.IsNullOrEmpty(pw.CustomerId))
+                _traceLog.Trace($"Starting publish");
+                if (pw == null)
                 {
-                    throw new ArgumentNullException(nameof(pw), "Customer ID cannot be null or empty.");
+                    _traceLog.Error($"PublishAsync - passed in Publish Wrapper is NULL");
+                    throw new ArgumentNullException(nameof(pw), "Publish Wrapper cannot be null.");
+                }
+                _traceLog.Trace($"Received Publish Wrapper: {pw}");
+                if (!pw.IsValid(out string invalidMessage))
+                {
+                    var msg = $"PublishAsync - passed in Publish Wrapper is invalid | REASON: {invalidMessage}";
+                    _traceLog.Error(msg);
+                    throw new ArgumentNullException(nameof(pw), msg);
                 }
                 
                 // Lazily initialize the channel for this HTTP request scope if it doesn't exist
+                _traceLog.Trace($"Awaiting channel semaphore");
                 await _channelSemaphore.WaitAsync();
                 if (_channel == null || !_channel.IsOpen)
                 {
                     if (_channel != null)
                     {
+                        _traceLog.Trace($"Disposing of non-null, but non-open channel");
                         await _channel.DisposeAsync();
                     }
 
                     var channelOptions = new CreateChannelOptions(publisherConfirmationsEnabled: true, publisherConfirmationTrackingEnabled: true);
 
+                    _traceLog.Trace($"Creating channel");
                     _channel = await _connection.CreateChannelAsync(channelOptions, pw.CancelToken);
                 }
+                _traceLog.Trace($"Converting payload to bytes");
                 var bodyBytes = Encoding.UTF8.GetBytes(pw.Payload);
+                _traceLog.Trace($"NUM BYTES: {bodyBytes.Length}");
                 
                 // Modern v7+ Properties Setup with async delivery tracking
+                _traceLog.Trace($"Creating Basic Properties object");
                 var properties = new BasicProperties
                 {
                     ContentType = "application/json",
@@ -58,6 +76,7 @@ namespace Damper.Infrastructure.QueueManagement
                 };
     
                 // Modern v7+ async publishing pattern
+                _traceLog.Trace($"Publishing to exchange");
                 await _channel.BasicPublishAsync(
                     exchange: _appOptMon.CurrentValue.RabbitMqData.ExchangeName,
                     routingKey: pw.CustomerId,
@@ -66,18 +85,23 @@ namespace Damper.Infrastructure.QueueManagement
                     body: bodyBytes,
                     cancellationToken: pw.CancelToken
                 );
+                _traceLog.Trace($"Publish successful!");
                 return true;
             }
             catch (Exception ex)
             {
                 if (pw.ShouldThrow)
                 {
-                    throw new WebhookPublishException($"Fatal publish failure | CUSTOMER ID: {pw.CustomerId} | CORRELATION ID: {pw.CorrelationId}.", ex);
+                    var msg = $"Fatal publish failure | CUSTOMER ID: {pw.CustomerId}";
+                    _traceLog.Error(msg, ex);
+                    throw new WebhookPublishException(msg, ex);
                 }
+                _traceLog.Error($"Publish failed! (ShouldThrow = false)");
                 return false;
             }
             finally
             {
+                _traceLog.Trace($"Releasing channel semaphore");
                 _channelSemaphore.Release();
             }
         }

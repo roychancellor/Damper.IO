@@ -12,4 +12,5 @@ public static class Loggers
     public static ILogger Application => _factory?.CreateLogger("Application") ?? NullLogger.Instance;
     public static ILogger Request => _factory?.CreateLogger("Request") ?? NullLogger.Instance;
     public static ILogger Health => _factory?.CreateLogger("Health") ?? NullLogger.Instance;
+    public static ILogger RequestTrace => _factory?.CreateLogger("RequestTrace") ?? NullLogger.Instance;
 }

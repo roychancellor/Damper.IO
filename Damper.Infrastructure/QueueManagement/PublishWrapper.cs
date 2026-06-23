@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
 
 namespace Damper.Infrastructure.QueueManagement
@@ -23,6 +24,41 @@ namespace Damper.Infrastructure.QueueManagement
                 CancelToken = ct,
                 ShouldThrow = shouldThrow,
             };
+        }
+
+        public bool IsValid(out string invalidMessage)
+        {
+            invalidMessage = string.Empty;
+            var sb = new StringBuilder();
+            bool result = false;
+            if (string.IsNullOrWhiteSpace(CorrelationId))
+            {
+                sb.Append($"Correlation ID can not be null or empty");
+            }
+            else if (string.IsNullOrWhiteSpace(CustomerId))
+            {
+                sb.Append($"{GetSeparator(sb)}Customer ID can not be null or empty");
+            }
+            else if (string.IsNullOrWhiteSpace(Payload))
+            {
+                sb.Append($"{GetSeparator(sb)}Payload can not be null or empty");
+            }
+            else
+            {
+                result = true;
+            }
+            invalidMessage = sb.ToString();
+            return result;
+        }
+
+        private string GetSeparator(StringBuilder sb)
+        {
+            return sb.Length > 0 ? " | " : "";
+        }
+
+        public override string ToString()
+        {
+            return $"{nameof(CorrelationId)}: {CorrelationId} | {nameof(CustomerId)}: {CustomerId} | {nameof(Payload)}: {Payload} | {nameof(ShouldThrow)}: {ShouldThrow}";
         }
     }
 }
