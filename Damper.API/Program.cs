@@ -15,28 +15,37 @@ try
 {
     bootstrapLogger.Info($"DAMPER.IO APPLICATION STARTING");
 
+    bootstrapLogger.Info($"Creating web application builder");
     var builder = WebApplication.CreateBuilder(args);
 
+    bootstrapLogger.Info($"Configuring application data");
     builder.Services.Configure<AppRefData>(builder.Configuration.GetSection("ApplicationData"));
     
+    bootstrapLogger.Info($"Setting NLog as the logging provider");
     builder.Logging.ClearProviders();
     builder.Host.UseNLog();
     
+    bootstrapLogger.Info($"Adding services");
     builder.Services.AddRepositories()
                     .AddRabbitMqInfrastructure()
                     .AddQueuePublishing()
                     .AddWebhookIngestion();
     
+    bootstrapLogger.Info($"BUILDING APPLICATION");
     var app = builder.Build();
     
+    bootstrapLogger.Info($"Initializing loggers");
     var loggerFactory = app.Services.GetRequiredService<ILoggerFactory>();
     Loggers.Initialize(loggerFactory);
 
+    Loggers.Application.Info($"Setting middleware");
     app.UseMiddleware<CorrelationIdMiddleware>();
     
     // Configure the HTTP request pipeline.
+    Loggers.Application.Info($"Configuring HTTP request pipeline");
     app.UseHttpsRedirection();
     
+    Loggers.Application.Info($"Defining minimal API - MapPost");
     app.MapPost("v1/inbound/{customerId}", async (
         string customerId, 
         HttpContext context,
@@ -61,6 +70,7 @@ try
             };
     });
     
+    Loggers.Application.Info($"Calling app.Run");
     app.Run();
 }
 catch (Exception ex)
@@ -70,5 +80,6 @@ catch (Exception ex)
 }
 finally
 {
+    Loggers.Application.Info($"Shutting down NLog log manager");
     LogManager.Shutdown();
 }

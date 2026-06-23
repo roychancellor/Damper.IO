@@ -27,7 +27,7 @@ public class WebhookIngestionService : IWebhookIngestionService
         var customerId = rw.CustomerId;
         var correlationId = rw.CorrelationId;
 
-        _log.Info($"====> New webhook request received | CUSTOMER: {customerId} | CORRELATION: {correlationId}");
+        _log.Info($"====> New webhook request received | CUSTOMER: {customerId}");
         var customerConfig = await _customerRepo.GetByIdAsync(customerId, rw.CancelToken);
         if (customerConfig == null)
         {
@@ -81,13 +81,13 @@ public class WebhookIngestionService : IWebhookIngestionService
         }
 
         // Success! Return a tracking ID back to the API
-        _log.Info($"<==== Webhook request processed | CUSTOMER: {customerId} | CORRELATION: {correlationId}");
+        _log.Info($"<==== Webhook request processed | CUSTOMER: {customerId}");
         return Result<string>.Success(correlationId);
     }
 
-    private Result<string> LogAndGenerateFailureResult(RequestWrapper rw)
+    private static Result<string> LogAndGenerateFailureResult(RequestWrapper rw)
     {
-        _log.Error($"{rw.ErrorMessage} | CUSTOMER: {rw.CustomerId} | CORRELATION: {rw.CorrelationId}");
+        _log.Error($"{rw.ErrorMessage} | CUSTOMER: {rw.CustomerId}");
         return Result<string>.Failure(rw.ErrorType, rw.ErrorMessage);
     }
 }
