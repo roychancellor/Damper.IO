@@ -42,21 +42,21 @@ public class WebhookIngestionService : IWebhookIngestionService
         {
             return LogAndGenerateFailureResult(rw.SetError("The incoming webhook header key cannot be null or empty", ErrorType.BadRequest));
         }
-        
+
         // TODO: Investigate streaming the webhook payload to the queue rather than reading
         // the entire payload into memory. If configured correctly, the upstream reverse proxy
-        // e.g., HAProxy will reject payloads above a certain size, so streaming my not be
-        // needed.
-        using var reader = new StreamReader(rw.RequestBody ?? throw new ArgumentNullException(nameof(rw), $"Request body stream cannot be null"));
-        string rawPayload = await reader.ReadToEndAsync(rw.CancelToken);
-        if (string.IsNullOrEmpty(rawPayload))
+        // e.g., HAProxy will reject payloads above a certain size, so streaming my not be needed.
+        var base64Body = await StreamToBase64String(rw);
+        if (string.IsNullOrEmpty(base64Body))
         {
             return LogAndGenerateFailureResult(rw.SetError("The incoming webhook payload cannot be null or empty", ErrorType.BadRequest));
         }
 
-        var toPublishStr = WebhookEnvelope.BuildToPublish(correlationId, customerId, customerConfig.DestinationURL, rawPayload)
-                                          .Jsonify();
-        if (string.IsNullOrEmpty(toPublishStr))
+        var headerDictionary = rw.HttpHeaders.ToDictionary(h => h.Key, h => h.Value.ToString());
+
+        var toPublishEnvelope = WebhookEnvelope.BuildToPublish(correlationId, customerId, customerConfig.DestinationURL, base64Body, headerDictionary)
+                                               .Jsonify();
+        if (string.IsNullOrEmpty(toPublishEnvelope))
         {
             return LogAndGenerateFailureResult(rw.SetError("Unable to serialize the ingested webhook payload", ErrorType.BadRequest));
         }
@@ -67,7 +67,7 @@ public class WebhookIngestionService : IWebhookIngestionService
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(rw.CancelToken, _appLifetime.ApplicationStopping);
         try
         {
-            var pw = PublishWrapper.BuildFrom(correlationId, customerId, toPublishStr, linkedCts.Token, shouldThrow: false);
+            var pw = PublishWrapper.BuildFrom(correlationId, customerId, toPublishEnvelope, linkedCts.Token, shouldThrow: false);
             var isPublishSuccessful = await _queuePublisher.PublishAsync(pw);
             if (!isPublishSuccessful)
             {
@@ -83,6 +83,15 @@ public class WebhookIngestionService : IWebhookIngestionService
         // Success! Return a tracking ID back to the API
         _log.Info($"<==== Webhook request processed | CUSTOMER: {customerId}");
         return Result<string>.Success(correlationId);
+    }
+
+    private static async Task<string> StreamToBase64String(RequestWrapper rw)
+    {
+        using var memoryStream = new MemoryStream();
+        await rw.RequestBody.CopyToAsync(memoryStream);
+        var rawBodyBytes = memoryStream.ToArray();
+        var base64Body = Convert.ToBase64String(rawBodyBytes);
+        return base64Body;
     }
 
     private static Result<string> LogAndGenerateFailureResult(RequestWrapper rw)
