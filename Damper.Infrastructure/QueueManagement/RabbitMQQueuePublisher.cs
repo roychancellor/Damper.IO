@@ -56,7 +56,7 @@ namespace Damper.Infrastructure.QueueManagement
                     _traceLog.Trace($"Creating channel");
                     _channel = await _connection.CreateChannelAsync(channelOptions, pw.CancelToken);
                 }
-                _traceLog.Trace($"Converting payload to bytes");
+                _traceLog.Trace($"Converting webhook envelope payload to bytes");
                 var bodyBytes = Encoding.UTF8.GetBytes(pw.Payload);
                 _traceLog.Trace($"NUM BYTES: {bodyBytes.Length}");
                 

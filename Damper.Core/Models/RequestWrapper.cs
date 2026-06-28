@@ -7,7 +7,7 @@ namespace Damper.Core.Models
         public string CorrelationId{ get; set; } = string.Empty;
         public string CustomerId{ get; set; } = string.Empty;
         public IHeaderDictionary HttpHeaders{ get; set; } = new HeaderDictionary();
-        public Stream? RequestBody{ get; set; }
+        public Stream RequestBody{ get; set; } = new MemoryStream();
         public CancellationToken CancelToken { get; set; }
         public ErrorType ErrorType { get; set; }
         public string ErrorMessage { get; set; } = string.Empty;
@@ -29,6 +29,17 @@ namespace Damper.Core.Models
             this.ErrorMessage = errorMessage;
             this.ErrorType = errorType;
             return this;
+        }
+
+        public bool IsProcessable()
+        {
+            return !(
+                        string.IsNullOrWhiteSpace(CorrelationId) ||
+                        string.IsNullOrWhiteSpace(CustomerId) ||
+                        HttpHeaders == null ||
+                        HttpHeaders.Count == 0 ||
+                        RequestBody == null
+                    );
         }
     }
 }
