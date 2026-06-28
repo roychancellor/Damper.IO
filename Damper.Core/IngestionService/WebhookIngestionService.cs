@@ -24,6 +24,12 @@ public class WebhookIngestionService : IWebhookIngestionService
 
     public async Task<Result<string>> ProcessIngressAsync(RequestWrapper rw)
     {
+        if (rw == null || !rw.IsProcessable())
+        {
+            var msg = $"The incoming webhook request is null or unprocessable";
+            _log.Error(msg);
+            return Result<string>.Failure(ErrorType.ServerError, msg);
+        }
         var customerId = rw.CustomerId;
         var correlationId = rw.CorrelationId;
 
@@ -43,9 +49,7 @@ public class WebhookIngestionService : IWebhookIngestionService
             return LogAndGenerateFailureResult(rw.SetError("The incoming webhook header key cannot be null or empty", ErrorType.BadRequest));
         }
 
-        // TODO: Investigate streaming the webhook payload to the queue rather than reading
-        // the entire payload into memory. If configured correctly, the upstream reverse proxy
-        // e.g., HAProxy will reject payloads above a certain size, so streaming my not be needed.
+        // To preserve the webhook payload byte-for-byte, convert it to a byte array, then base 64 encode the array to a string
         var base64Body = await StreamToBase64String(rw);
         if (string.IsNullOrEmpty(base64Body))
         {
@@ -54,7 +58,10 @@ public class WebhookIngestionService : IWebhookIngestionService
 
         var headerDictionary = rw.HttpHeaders.ToDictionary(h => h.Key, h => h.Value.ToString());
 
-        var toPublishEnvelope = WebhookEnvelope.BuildToPublish(correlationId, customerId, customerConfig.DestinationURL, base64Body, headerDictionary)
+        var toPublishEnvelope = WebhookEnvelope.BuildBase(rw)
+                                               .SetDestination(customerConfig.DestinationURL)
+                                               .SetPayload(base64Body)
+                                               .SetHeaders(headerDictionary)
                                                .Jsonify();
         if (string.IsNullOrEmpty(toPublishEnvelope))
         {
@@ -67,7 +74,10 @@ public class WebhookIngestionService : IWebhookIngestionService
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(rw.CancelToken, _appLifetime.ApplicationStopping);
         try
         {
-            var pw = PublishWrapper.BuildFrom(correlationId, customerId, toPublishEnvelope, linkedCts.Token, shouldThrow: false);
+            var pw = PublishWrapper.BuildBase(linkedCts.Token, shouldThrow: true)
+                                   .SetCorrelationID(correlationId)
+                                   .SetCustomerID(customerId)
+                                   .SetPayload(toPublishEnvelope);
             var isPublishSuccessful = await _queuePublisher.PublishAsync(pw);
             if (!isPublishSuccessful)
             {

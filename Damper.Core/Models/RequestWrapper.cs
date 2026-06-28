@@ -30,5 +30,16 @@ namespace Damper.Core.Models
             this.ErrorType = errorType;
             return this;
         }
+
+        public bool IsProcessable()
+        {
+            return !(
+                        string.IsNullOrWhiteSpace(CorrelationId) ||
+                        string.IsNullOrWhiteSpace(CustomerId) ||
+                        HttpHeaders == null ||
+                        HttpHeaders.Count == 0 ||
+                        RequestBody == null
+                    );
+        }
     }
 }

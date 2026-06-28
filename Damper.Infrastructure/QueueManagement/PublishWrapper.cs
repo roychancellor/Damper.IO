@@ -26,6 +26,33 @@ namespace Damper.Infrastructure.QueueManagement
             };
         }
 
+        public static PublishWrapper BuildBase(CancellationToken ct, bool shouldThrow = false)
+        {
+            return new PublishWrapper
+            {
+                CancelToken = ct,
+                ShouldThrow = shouldThrow,
+            };
+        }
+
+        public PublishWrapper SetCorrelationID(string toSet)
+        {
+            CorrelationId = toSet;
+            return this;
+        }
+
+        public PublishWrapper SetCustomerID(string toSet)
+        {
+            CustomerId = toSet;
+            return this;
+        }
+
+        public PublishWrapper SetPayload(string toSet)
+        {
+            Payload = toSet;
+            return this;
+        }
+
         public bool IsValid(out string invalidMessage)
         {
             invalidMessage = string.Empty;

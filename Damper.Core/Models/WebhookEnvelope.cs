@@ -18,18 +18,34 @@ namespace Damper.Core.Models
         // A thread-safe hook to signal that final HTTP processing is complete
         public Func<Task>? OnProcessingCompleteAsync { get; set; }
 
-        public static WebhookEnvelope BuildToPublish(string correlationId, string customerId, string destinationURL, string base64Payload, Dictionary<string, string> headers)
+        public static WebhookEnvelope BuildBase(RequestWrapper rw)
         {
-            return new WebhookEnvelope
+            var toReturn = new WebhookEnvelope
             {
-                CorrelationId = correlationId,
-                CustomerId = customerId,
-                DestinationUrl = destinationURL,
-                Base64Payload = base64Payload,
-                Headers = headers,
-                ReceivedAt = DateTime.UtcNow,
-                AttemptCount = 1,
+              CorrelationId = rw.CorrelationId,
+              CustomerId = rw.CustomerId,
+              ReceivedAt = DateTime.UtcNow,
+              AttemptCount = 1,  
             };
+            return toReturn;
+        }
+
+        public WebhookEnvelope SetDestination(string toSet)
+        {
+            DestinationUrl = toSet;
+            return this;
+        }
+
+        public WebhookEnvelope SetPayload(string toSet)
+        {
+            Base64Payload = toSet;
+            return this;
+        }
+
+        public WebhookEnvelope SetHeaders(Dictionary<string, string> toSet)
+        {
+            Headers = toSet;
+            return this;
         }
 
         public string Jsonify()
