@@ -1,6 +1,5 @@
 using Damper.Core.IngestionService;
 using Damper.Core.Middleware;
-using Damper.Core.Models;
 using Damper.Core.Utilities;
 using Damper.Infrastructure.Extensions;
 using Damper.Infrastructure.Logging;
@@ -8,6 +7,10 @@ using NLog.Web;
 using NLog;
 using Damper.Infrastructure.ReferenceData;
 using Microsoft.Extensions.Options;
+using Damper.Infrastructure.Models;
+using Damper.Infrastructure.CustomerChannels;
+using Damper.Infrastructure.ChannelRegistry;
+using Damper.Core.OutboundService;
 
 var bootstrapLogger = LogManager.Setup().GetCurrentClassLogger();
 
@@ -30,6 +33,24 @@ try
                     .AddRabbitMqInfrastructure()
                     .AddQueuePublishing()
                     .AddWebhookIngestion();
+    builder.Services.AddSingleton<IChannelRegistry, CustomerChannelRegistry>();
+    for (int i = 0; i < 16; i++)
+    {
+        int shardIndex = i;
+        builder.Services.AddHostedService(sp => new ShardBackgroundWorker(shardIndex, sp.GetRequiredService<IChannelRegistry>()));
+    }
+    builder.Services.AddHttpClient("DamperEgress")
+                    .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+                    {
+                        // Keep-alive timeouts protect against dead network pipes
+                        PooledConnectionLifetime = TimeSpan.FromMinutes(2), // FIXES DNS STAGNATION: Recycles sockets safely
+                        PooledConnectionIdleTimeout = TimeSpan.FromMinutes(1),
+                        
+                        // Performance tuning for massive multi-tenant throughput
+                        MaxConnectionsPerServer = 100, // Limits connections to any *single* customer domain
+                        EnableMultipleHttp2Connections = true // Enhances HTTP/2 streaming multiplexing efficiency
+                    })
+                    .SetHandlerLifetime(TimeSpan.FromMinutes(2)); // Syncs factory management duration
     
     bootstrapLogger.Info($"BUILDING APPLICATION");
     var app = builder.Build();

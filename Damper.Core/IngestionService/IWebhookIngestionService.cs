@@ -1,5 +1,5 @@
 ﻿using Microsoft.AspNetCore.Http;
-using Damper.Core.Models;
+using Damper.Infrastructure.Models;
 
 namespace Damper.Core.IngestionService;
 

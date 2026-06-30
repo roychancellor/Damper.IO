@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace Damper.Core.Models
+namespace Damper.Infrastructure.Models
 {
     public class WebhookEnvelope
     {

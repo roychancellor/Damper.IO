@@ -1,4 +1,4 @@
-namespace Damper.Core.Models
+namespace Damper.Infrastructure.Models
 {
     public class Result<TValue>
     {
