@@ -19,7 +19,6 @@ namespace Damper.Core.OutboundService
             _channelRegistry = channelRegistry;
         }
 
-        // TODO: DECOUPLE THE CREATING OF THE CHANNEL INTO A FACTORY - REFER TO GEMINI CHAT FOR DETAILS
         public async Task ProcessMessageAsync(BasicDeliverEventArgs ea, IShardProcessingContext context)
         {
             try
@@ -56,8 +55,24 @@ namespace Damper.Core.OutboundService
 
                 _log.Debug($"Getting customer channel | CUST ID: {envelope.CustomerId} | DEL TAG: {ea.DeliveryTag}");
                 var writer = await _channelRegistry.GetOrCreateChannel(envelope.CustomerId);
-                _log.Debug($"Sending envelope to customer channel | CUST ID: {envelope.CustomerId} | DEL TAG: {ea.DeliveryTag}");
-                await writer.WriteAsync(envelope);
+                
+                _log.Debug($"Attempting non-blocking write to customer channel | CUST ID: {envelope.CustomerId} | DEL TAG: {ea.DeliveryTag}");
+                
+                // Use TryWrite instead of an awaited WriteAsync to eliminate Head-of-Line blocking
+                if (!writer.TryWrite(envelope))
+                {
+                    _log.LogWarning("Customer {Id} buffer is full or suspended. NACKing message to free up Shard {Idx}.", envelope.CustomerId, context.ShardIndex);
+
+                    // Return the message to the broker so other customers' traffic can pass through
+                    await context.NackAsync(ea.DeliveryTag, multiple: false, requeue: true);
+
+                    // Small 50ms pause prevents this specific shard thread from hammering RabbitMQ 
+                    // in a tight loop if the queue contains only this blocked customer's data.
+                    await Task.Delay(50);
+                    return;
+                }
+                
+                _log.Debug($"Successfully enqueued envelope | CUST ID: {envelope.CustomerId} | DEL TAG: {ea.DeliveryTag}");
             }
             catch (ArgumentNullException aex)
             {

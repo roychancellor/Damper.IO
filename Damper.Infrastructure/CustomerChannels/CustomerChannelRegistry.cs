@@ -6,7 +6,6 @@ using Damper.Infrastructure.Models;
 using Damper.Infrastructure.Repositories;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using System.Net.Http;
 using Microsoft.Extensions.Hosting;
 
 namespace Damper.Infrastructure.CustomerChannels
@@ -15,69 +14,121 @@ namespace Damper.Infrastructure.CustomerChannels
     {
         private static readonly ILogger _log = Loggers.Request;
 
-        private readonly ConcurrentDictionary<string, Channel<WebhookEnvelope>> _registry = new();
-        private readonly IHttpClientFactory _httpClientFactory;
-        private readonly CancellationToken _ct;
-        private readonly IServiceScopeFactory _scopeFactory; // The standard lifecycle bridge
+        private readonly ConcurrentDictionary<string, CustomerEgressPipeline> _registry = new();
+        
+        // Tracks suspended customer IDs with O(1) thread-safe lookups
+        private readonly ConcurrentDictionary<string, byte> _suspendedCustomers = new();
+        private readonly SuspendedChannelWriter _suspendedWriter = new();
 
-        public CustomerChannelRegistry(IHttpClientFactory httpClientFactory, IServiceScopeFactory scopeFactory, IHostApplicationLifetime appLifetime)
+        private readonly CancellationToken _ct;
+        private readonly IServiceScopeFactory _scopeFactory;
+        private readonly IEgressPipelineFactory _pipelineFactory;
+        private readonly SemaphoreSlim _initLock = new(1, 1);
+
+        public CustomerChannelRegistry(
+            IEgressPipelineFactory egressPipelineFactory, 
+            IServiceScopeFactory scopeFactory, 
+            IHostApplicationLifetime appLifetime)
         {
-            _httpClientFactory = httpClientFactory;
+            _pipelineFactory = egressPipelineFactory;
             _scopeFactory = scopeFactory;
             _ct = appLifetime.ApplicationStopping;
         }
 
         public async Task<ChannelWriter<WebhookEnvelope>> GetOrCreateChannel(string customerId)
         {
-            if (_registry.TryGetValue(customerId, out var existingChannel))
+            // 1. FAST CIRCUIT PATH: Check suspension state instantly without touching any pipelines or dictionary lookups
+            if (_suspendedCustomers.ContainsKey(customerId))
+            {
+                return _suspendedWriter;
+            }
+
+            // 2. HAPPY PATH: Registry cache hit (No locks, highly concurrent)
+            if (_registry.TryGetValue(customerId, out var pipeline))
             {
                 _log.Debug($"Channel registry HIT for customer ID {customerId} - returning writer immediately");
-                return existingChannel.Writer;
+                return pipeline.Writer;
             }
 
-            // Open a scope to safely consume the scoped repository
+            // 3. REGISTRY MISS: Lock exclusively to build the pipeline instance safely
+            await _initLock.WaitAsync(_ct);
             CustomerConfig? currentConfig;
-            using (var scope = _scopeFactory.CreateScope())
+            try
             {
-                _log.Debug($"Channel registry MISS for customer ID {customerId} - getting customer repository and retrieving customer config.");
-                var repo = scope.ServiceProvider.GetRequiredService<ICustomerRepository>();
-                currentConfig = await repo.GetByIdAsync(customerId, _ct);
-            } // The scope ends here, cleaning up any database contexts instantly
+                // Double-check lock mitigation pattern
+                if (_registry.TryGetValue(customerId, out pipeline))
+                {
+                    return pipeline.Writer;
+                }
 
-            if (currentConfig == null)
-            {
-                var msg = $"Configuration missing for customer: {customerId}";
-                _log.Error($"While attempting to get customer config from repository - {msg}");
-                throw new InvalidOperationException(msg);
+                // If the customer was marked suspended while we were waiting for the lock, catch it here
+                if (_suspendedCustomers.ContainsKey(customerId))
+                {
+                    return _suspendedWriter;
+                }
+
+                using (var scope = _scopeFactory.CreateScope())
+                {
+                    _log.Debug($"Channel registry MISS for customer ID {customerId} - getting customer repository and retrieving customer config.");
+                    var repo = scope.ServiceProvider.GetRequiredService<ICustomerRepository>();
+                    currentConfig = await repo.GetByIdAsync(customerId, _ct);
+                    if (currentConfig == null)
+                    {
+                        var msg = $"Configuration missing for customer: {customerId}";
+                        _log.Error($"While attempting to get customer config from repository - {msg}");
+                        throw new InvalidOperationException(msg);
+                    }
+                }
+
+                pipeline = _pipelineFactory.CreatePipeline(currentConfig, _ct);
+                if (!_registry.TryAdd(customerId, pipeline))
+                {
+                    _log.Warn($"While attempting to add pipeline to registry, customer Id already existed | CUST ID: {customerId}");
+                }
+                
+                return pipeline.Writer;
             }
-            
-            return _registry.GetOrAdd(customerId, BuildCustomerChannel).Writer;
-        }
-
-        private Channel<WebhookEnvelope> BuildCustomerChannel(string customerId)
-        {
-            _log.Debug($"Creating/starting channel and adding to registry for customer ID {customerId}");
-            var channelOptions = new BoundedChannelOptions(5000)
+            finally
             {
-                FullMode = BoundedChannelFullMode.Wait, // will create backpressure
-                SingleWriter = false,
-                SingleReader = true
-            };
-
-            var channel = Channel.CreateBounded<WebhookEnvelope>(channelOptions);
-
-            // Kick off the long-running trickle sender loop
-            _ = Task.Run(() => StartChannelDispatcherAsync(customerId, channel.Reader, _ct));
-
-            _log.Info("Channel Registry: Initialized isolated egress valve for Customer {CustomerId}", customerId);
-            return channel;
+                _initLock.Release();
+            }
         }
 
-        private async Task StartChannelDispatcherAsync(string customerId, ChannelReader<WebhookEnvelope> reader, CancellationToken ct)
+        /// <summary>
+        /// Invoked by the ChannelDispatcher when an egress endpoint repeatedly fails downstream.
+        /// Tears down the operational infrastructure and shifts the registry into a safe non-blocking rejection state.
+        /// </summary>
+        public void MarkAsSuspended(string customerId)
         {
-            // Pass the repository along to the dispatcher so it can re-query fresh config definitions on the fly
-            var dispatcher = new ChannelDispatcher(_httpClientFactory, customerId, reader, _scopeFactory, ct);
-            await dispatcher.RunLoopAsync(ct);
+            if (_suspendedCustomers.TryAdd(customerId, default))
+            {
+                _log.LogCritical("Circuit Breaker Tripped in Registry for Customer {Id}. Suspending channel.", customerId);
+
+                // Evict the pipeline structure completely out of operational memory
+                if (_registry.TryRemove(customerId, out var pipeline))
+                {
+                    try
+                    {
+                        // Forces the ChannelDispatcher loop to break execution processing naturally
+                        pipeline.Writer.TryComplete();
+                    }
+                    catch (Exception ex)
+                    {
+                        _log.Error(ex, "Error completing channel writer during pipeline suspension for Customer {Id}", customerId);
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Invoked by your administration tier or dashboard event receiver when a customer re-enables their endpoint.
+        /// </summary>
+        public void ResumeCustomer(string customerId)
+        {
+            if (_suspendedCustomers.TryRemove(customerId, out _))
+            {
+                _log.LogInformation("Circuit Breaker Reset. Resuming ingestion paths for Customer {Id}.", customerId);
+            }
         }
     }
 }

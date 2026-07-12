@@ -7,5 +7,6 @@ namespace Damper.Infrastructure.Repositories
         public string DestinationURL { get; set; } = "";
         public int DeliveryRate { get; set; }
         public int DeliveryIntervalMillis { get; set; }
+        public int MaxQueueCapacity { get; set; }
     }
 }

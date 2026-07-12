@@ -6,7 +6,6 @@ using Damper.Infrastructure.Logging;
 using NLog.Web;
 using NLog;
 using Damper.Infrastructure.ReferenceData;
-using Microsoft.Extensions.Options;
 using Damper.Infrastructure.Models;
 using Damper.Infrastructure.CustomerChannels;
 using Damper.Infrastructure.ChannelRegistry;
@@ -34,10 +33,12 @@ try
                     .AddQueuePublishing()
                     .AddWebhookIngestion();
     builder.Services.AddSingleton<IChannelRegistry, CustomerChannelRegistry>();
+    builder.Services.AddSingleton<IShardMessageProcessor, ShardMessageProcessor>();
+    builder.Services.AddSingleton<IEgressPipelineFactory, CustomerEgressPipelineFactory>();
     for (int i = 0; i < 16; i++)
     {
         int shardIndex = i;
-        builder.Services.AddHostedService(sp => new ShardBackgroundWorker(shardIndex, sp.GetRequiredService<IChannelRegistry>()));
+        builder.Services.AddHostedService(sp => new ShardBackgroundWorker(shardIndex, sp.GetRequiredService<IShardMessageProcessor>()));
     }
     builder.Services.AddHttpClient("DamperEgress")
                     .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
