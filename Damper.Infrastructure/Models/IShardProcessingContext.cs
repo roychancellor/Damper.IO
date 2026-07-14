@@ -1,6 +1,6 @@
 using RabbitMQ.Client.Events;
 
-namespace Damper.Core.OutboundService
+namespace Damper.Infrastructure.Models
 {
     public interface IShardProcessingContext
     {

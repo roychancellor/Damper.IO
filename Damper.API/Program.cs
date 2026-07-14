@@ -10,6 +10,7 @@ using Damper.Infrastructure.Models;
 using Damper.Infrastructure.CustomerChannels;
 using Damper.Infrastructure.ChannelRegistry;
 using Damper.Core.OutboundService;
+using Microsoft.Extensions.ObjectPool;
 
 var bootstrapLogger = LogManager.Setup().GetCurrentClassLogger();
 
@@ -53,6 +54,15 @@ try
                     })
                     .SetHandlerLifetime(TimeSpan.FromMinutes(2)); // Syncs factory management duration
     
+    // Register the default object pool provider for making a pool of WebAckContext objects
+    // Use a pooled policy for the WebhookAckContext type
+    builder.Services.AddSingleton<ObjectPoolProvider, DefaultObjectPoolProvider>();
+    builder.Services.AddSingleton(sp =>
+    {
+        var provider = sp.GetRequiredService<ObjectPoolProvider>();
+        return provider.Create<WebhookAckContext>();
+    });
+
     bootstrapLogger.Info($"BUILDING APPLICATION");
     var app = builder.Build();
     

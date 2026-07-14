@@ -1,4 +1,5 @@
 using Damper.Infrastructure.Logging;
+using Damper.Infrastructure.Models;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using RabbitMQ.Client;

@@ -1,3 +1,4 @@
+using Damper.Infrastructure.Models;
 using RabbitMQ.Client.Events;
 
 namespace Damper.Core.OutboundService

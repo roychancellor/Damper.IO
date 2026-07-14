@@ -5,6 +5,7 @@ using Damper.Infrastructure.Models;
 using Damper.Infrastructure.Repositories;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.ObjectPool;
 
 namespace Damper.Infrastructure.CustomerChannels
 {
@@ -14,6 +15,7 @@ namespace Damper.Infrastructure.CustomerChannels
         private readonly string _customerId;
         private readonly ChannelReader<WebhookEnvelope> _reader;
         private readonly IServiceScopeFactory _scopeFactory; // The standard lifecycle bridge
+        private readonly ObjectPool<WebhookAckContext> _contextPool;
         private static readonly ILogger _log = Loggers.Request;
         private readonly CancellationToken _ct;
         private CustomerConfig _config;
@@ -23,6 +25,7 @@ namespace Damper.Infrastructure.CustomerChannels
             CustomerConfig initialConfig, 
             ChannelReader<WebhookEnvelope> reader, 
             IServiceScopeFactory scopeFactory,
+            ObjectPool<WebhookAckContext> contextPool,
             CancellationToken ct)
         {
             _httpClientFactory = httpClientFactory;
@@ -30,6 +33,7 @@ namespace Damper.Infrastructure.CustomerChannels
             _customerId = initialConfig.CustomerId;
             _reader = reader;
             _scopeFactory = scopeFactory;
+            _contextPool = contextPool;
             _ct = ct;
         }
 
@@ -101,65 +105,85 @@ namespace Damper.Infrastructure.CustomerChannels
         
         private async Task DeliverWebhookWithRetryAsync(WebhookEnvelope envelope, CustomerConfig config, CancellationToken ct)
         {
-            int maxAttempts = 5;
-            bool delivered = false;
-            TimeSpan retryBackoff = TimeSpan.FromSeconds(2);
-
-            byte[] rawBytes = Convert.FromBase64String(envelope.Base64Payload);
-
-            while (!delivered && envelope.AttemptCount <= maxAttempts)
+            try
             {
-                var client = _httpClientFactory.CreateClient("DamperEgress");
-                
-                // Use the verified, fresh destination URL from our config
-                using var request = new HttpRequestMessage(HttpMethod.Post, config.DestinationURL);
-                request.Content = new ByteArrayContent(rawBytes);
+                // TODO: Get max attempts and retry backoff from app config
+                int maxAttempts = 5;
+                bool delivered = false;
+                TimeSpan retryBackoff = TimeSpan.FromSeconds(2);
 
-                foreach (var header in envelope.Headers)
+                byte[] rawBytes = Convert.FromBase64String(envelope.Base64Payload);
+
+                while (!delivered && envelope.AttemptCount <= maxAttempts)
                 {
-                    if (IsSystemHeader(header.Key)) continue;
-                    request.Headers.TryAddWithoutValidation(header.Key, header.Value);
-                }
+                    var client = _httpClientFactory.CreateClient("DamperEgress");
+                    using var request = new HttpRequestMessage(HttpMethod.Post, config.DestinationURL);
+                    request.Content = new ByteArrayContent(rawBytes);
 
-                if (envelope.Headers.TryGetValue("Content-Type", out var contentType))
-                {
-                    request.Content.Headers.ContentType = MediaTypeHeaderValue.Parse(contentType);
-                }
-
-                request.Headers.Add("X-Damper-Correlation-Id", envelope.CorrelationId);
-                request.Headers.Add("X-Damper-Delivery-Attempt", envelope.AttemptCount.ToString());
-
-                try
-                {
-                    // Link your individual 10-second request timeout with the overall application lifecycle token
-                    using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                    cts.CancelAfter(TimeSpan.FromSeconds(10));
-                    using var response = await client.SendAsync(request, cts.Token);
-
-                    if (response.IsSuccessStatusCode)
+                    foreach (var header in envelope.Headers)
                     {
-                        delivered = true;
+                        if (IsSystemHeader(header.Key)) continue;
+                        request.Headers.TryAddWithoutValidation(header.Key, header.Value);
                     }
-                    else
+
+                    if (envelope.Headers.TryGetValue("Content-Type", out var contentType))
+                    {
+                        request.Content.Headers.ContentType = MediaTypeHeaderValue.Parse(contentType);
+                    }
+
+                    request.Headers.Add("X-Damper-Correlation-Id", envelope.CorrelationId);
+                    request.Headers.Add("X-Damper-Delivery-Attempt", envelope.AttemptCount.ToString());
+
+                    try
+                    {
+                        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                        cts.CancelAfter(TimeSpan.FromSeconds(10));
+                        using var response = await client.SendAsync(request, cts.Token);
+
+                        if (response.IsSuccessStatusCode)
+                        {
+                            delivered = true; // while loop sentinel
+                        }
+                        else
+                        {
+                            envelope.AttemptCount++;
+                            retryBackoff = await DoExponentialBackoff(retryBackoff, ct);
+                        }
+                    }
+                    catch (Exception)
                     {
                         envelope.AttemptCount++;
-                        await Task.Delay(retryBackoff, ct);
-                        retryBackoff *= 2;
+                        retryBackoff = await DoExponentialBackoff(retryBackoff, ct);
                     }
                 }
-                catch (Exception)
+
+                // Execute the zero-allocation callback to ACK the message
+                if (envelope.AckContext != null)
                 {
-                    envelope.AttemptCount++;
-                    await Task.Delay(retryBackoff, ct);
-                    retryBackoff *= 2;
+                    await envelope.AckContext.AckAsync();
                 }
             }
-
-            // Trigger the feedback callback loop to execute BasicAck up on the shard worker
-            if (envelope.OnProcessingCompleteAsync != null)
+            finally
             {
-                await envelope.OnProcessingCompleteAsync();
+                // Crucial step: return object memory to the provider pool even if
+                // unexpected runtime exceptions occur above.
+                if (envelope.AckContext != null)
+                {
+                    _contextPool.Return(envelope.AckContext);
+                }
             }
+        }
+
+        private static async Task<TimeSpan> DoExponentialBackoff(TimeSpan retryBackoff, CancellationToken ct)
+        {
+            // ADD JITTER: Smear the retry window by +/- 20% to break concurrency synchronization
+            // TODO: Get jitter values from app config
+            int jitterMs = Random.Shared.Next(-200, 200);
+            var totalBackoff = retryBackoff + TimeSpan.FromMilliseconds(jitterMs);
+
+            await Task.Delay(totalBackoff > TimeSpan.Zero ? totalBackoff : retryBackoff, ct);
+            retryBackoff *= 2;
+            return retryBackoff;
         }
 
         private static bool IsSystemHeader(string key)
