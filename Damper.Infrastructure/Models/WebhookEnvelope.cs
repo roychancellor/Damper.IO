@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace Damper.Core.Models
+namespace Damper.Infrastructure.Models
 {
     public class WebhookEnvelope
     {
@@ -11,12 +11,10 @@ namespace Damper.Core.Models
         public Dictionary<string, string> Headers { get; set; } = [];
         public DateTime ReceivedAt { get; set; }
         public int AttemptCount { get; set; }
-        
-        // The Durable Feedback Mechanism:
-        public ulong DeliveryTag { get; set; }
-        
-        // A thread-safe hook to signal that final HTTP processing is complete
-        public Func<Task>? OnProcessingCompleteAsync { get; set; }
+       
+        // Uee a Webhook Ack Context that will come from an object pool to
+        // eliminate the use of an anonymous "OnProcessingCompleteAsync" lambda
+        public WebhookAckContext? AckContext { get; set; }
 
         public static WebhookEnvelope BuildBase(RequestWrapper rw)
         {

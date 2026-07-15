@@ -1,6 +1,6 @@
 using Microsoft.AspNetCore.Http;
 
-namespace Damper.Core.Models
+namespace Damper.Infrastructure.Models
 {
     public class RequestWrapper
     {

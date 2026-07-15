@@ -1,13 +1,16 @@
 using Damper.Core.IngestionService;
 using Damper.Core.Middleware;
-using Damper.Core.Models;
 using Damper.Core.Utilities;
 using Damper.Infrastructure.Extensions;
 using Damper.Infrastructure.Logging;
 using NLog.Web;
 using NLog;
 using Damper.Infrastructure.ReferenceData;
-using Microsoft.Extensions.Options;
+using Damper.Infrastructure.Models;
+using Damper.Infrastructure.CustomerChannels;
+using Damper.Infrastructure.ChannelRegistry;
+using Damper.Core.OutboundService;
+using Microsoft.Extensions.ObjectPool;
 
 var bootstrapLogger = LogManager.Setup().GetCurrentClassLogger();
 
@@ -30,7 +33,39 @@ try
                     .AddRabbitMqInfrastructure()
                     .AddQueuePublishing()
                     .AddWebhookIngestion();
+    builder.Services.AddSingleton<IChannelRegistry, CustomerChannelRegistry>();
+    builder.Services.AddSingleton<IShardMessageProcessor, ShardMessageProcessor>();
+    builder.Services.AddSingleton<IEgressPipelineFactory, CustomerEgressPipelineFactory>();
+    for (int i = 0; i < 16; i++)
+    {
+        int shardIndex = i;
+        // Using the explicit generic registration ensures Microsoft.Extensions.Hosting 
+        // correctly identifies and tracks each individual IHostedService instance.
+        builder.Services.AddTransient<IHostedService>(sp => new ShardBackgroundWorker(shardIndex, sp.GetRequiredService<IShardMessageProcessor>()));
+        //builder.Services.AddHostedService(sp => new ShardBackgroundWorker(shardIndex, sp.GetRequiredService<IShardMessageProcessor>()));
+    }
+    builder.Services.AddHttpClient("DamperEgress")
+                    .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+                    {
+                        // Keep-alive timeouts protect against dead network pipes
+                        PooledConnectionLifetime = TimeSpan.FromMinutes(2), // FIXES DNS STAGNATION: Recycles sockets safely
+                        PooledConnectionIdleTimeout = TimeSpan.FromMinutes(1),
+                        
+                        // Performance tuning for massive multi-tenant throughput
+                        MaxConnectionsPerServer = 100, // Limits connections to any *single* customer domain
+                        EnableMultipleHttp2Connections = true // Enhances HTTP/2 streaming multiplexing efficiency
+                    })
+                    .SetHandlerLifetime(TimeSpan.FromMinutes(2)); // Syncs factory management duration
     
+    // Register the default object pool provider for making a pool of WebAckContext objects
+    // Use a pooled policy for the WebhookAckContext type
+    builder.Services.AddSingleton<ObjectPoolProvider, DefaultObjectPoolProvider>();
+    builder.Services.AddSingleton(sp =>
+    {
+        var provider = sp.GetRequiredService<ObjectPoolProvider>();
+        return provider.Create<WebhookAckContext>();
+    });
+
     bootstrapLogger.Info($"BUILDING APPLICATION");
     var app = builder.Build();
     

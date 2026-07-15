@@ -8,7 +8,6 @@ public class FileSystemCustomerRepository : ICustomerRepository
         return await Task.FromResult(new CustomerConfig
         {
             CustomerId = "ABC123",
-            SecretKey = "ABC123SecretKey",
             WebhookHeaderKey = "X-Webhook-Header",
             DestinationURL = "https://customer.endpoint/webhook/post",
             DeliveryRate = 5,

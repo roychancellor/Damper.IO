@@ -1,6 +1,6 @@
 using System.Net.Http.Headers;
 using System.Text.Json;
-using Damper.Core.Models;
+using Damper.Infrastructure.Models;
 
 namespace Damper.Core.OutboundService
 {
