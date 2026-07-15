@@ -4,6 +4,6 @@ namespace Damper.Infrastructure.CustomerChannels
 {
     public interface IEgressPipelineFactory
     {
-        CustomerEgressPipeline CreatePipeline(CustomerConfig customerConfig, CancellationToken ct);
+        CustomerEgressPipeline CreatePipeline(CustomerConfig customerConfig, Action<string> onSuspensionTriggered, CancellationToken ct);
     }
 }

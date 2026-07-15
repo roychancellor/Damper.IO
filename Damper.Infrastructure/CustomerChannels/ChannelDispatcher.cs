@@ -12,6 +12,7 @@ namespace Damper.Infrastructure.CustomerChannels
     public class ChannelDispatcher
     {
         private readonly IHttpClientFactory _httpClientFactory;
+        private readonly Action<string> _onSuspensionTriggered;
         private readonly string _customerId;
         private readonly ChannelReader<WebhookEnvelope> _reader;
         private readonly IServiceScopeFactory _scopeFactory; // The standard lifecycle bridge
@@ -22,6 +23,7 @@ namespace Damper.Infrastructure.CustomerChannels
 
         public ChannelDispatcher(
             IHttpClientFactory httpClientFactory, 
+            Action<string> onSuspensionTriggered, 
             CustomerConfig initialConfig, 
             ChannelReader<WebhookEnvelope> reader, 
             IServiceScopeFactory scopeFactory,
@@ -29,6 +31,7 @@ namespace Damper.Infrastructure.CustomerChannels
             CancellationToken ct)
         {
             _httpClientFactory = httpClientFactory;
+            _onSuspensionTriggered = onSuspensionTriggered;
             _config = initialConfig;
             _customerId = initialConfig.CustomerId;
             _reader = reader;
@@ -46,7 +49,7 @@ namespace Damper.Infrastructure.CustomerChannels
 
             while (await _reader.WaitToReadAsync(ct))
             {
-                var deliveryTasks = new List<Task>();
+                var deliveryTasks = new List<Task<bool>>();
                 int messagesInBatch = 0;
 
                 // Drain up to the maximum burst capacity allowed for this interval window
@@ -60,7 +63,18 @@ namespace Damper.Infrastructure.CustomerChannels
                 if (deliveryTasks.Count > 0)
                 {
                     // Execute the outbound HTTP burst concurrently
-                    await Task.WhenAll(deliveryTasks);
+                    var results = await Task.WhenAll(deliveryTasks);
+
+                    // If any single message in this batch completely failed after exhausting internal retries,
+                    // trip the circuit breaker immediately.
+                    if (results.Any(success => !success))
+                    {
+                        _log.LogCritical("Circuit breaker triggered for Customer {Id} due to exhausted retries.", _customerId);
+                        _onSuspensionTriggered(_customerId);
+                        
+                        // Break out of the loop. The registry completion code will tear down this pipeline.
+                        return;
+                    }
 
                     // Only enforce the pacing delay if there is still data waiting in the channel.
                     // This prevents adding artificial latency to lone, sporadic trickle messages.
@@ -103,13 +117,13 @@ namespace Damper.Infrastructure.CustomerChannels
             }
         }
         
-        private async Task DeliverWebhookWithRetryAsync(WebhookEnvelope envelope, CustomerConfig config, CancellationToken ct)
+        private async Task<bool> DeliverWebhookWithRetryAsync(WebhookEnvelope envelope, CustomerConfig config, CancellationToken ct)
         {
+            bool delivered = false;
             try
             {
                 // TODO: Get max attempts and retry backoff from app config
                 int maxAttempts = 5;
-                bool delivered = false;
                 TimeSpan retryBackoff = TimeSpan.FromSeconds(2);
 
                 byte[] rawBytes = Convert.FromBase64String(envelope.Base64Payload);
@@ -172,6 +186,8 @@ namespace Damper.Infrastructure.CustomerChannels
                     _contextPool.Return(envelope.AckContext);
                 }
             }
+
+            return delivered;
         }
 
         private static async Task<TimeSpan> DoExponentialBackoff(TimeSpan retryBackoff, CancellationToken ct)
@@ -189,9 +205,9 @@ namespace Damper.Infrastructure.CustomerChannels
         private static bool IsSystemHeader(string key)
         {
             return key.Equals("Host", StringComparison.OrdinalIgnoreCase) ||
-                key.Equals("Content-Length", StringComparison.OrdinalIgnoreCase) ||
-                key.Equals("Connection", StringComparison.OrdinalIgnoreCase) ||
-                key.Equals("Content-Type", StringComparison.OrdinalIgnoreCase);
+                   key.Equals("Content-Length", StringComparison.OrdinalIgnoreCase) ||
+                   key.Equals("Connection", StringComparison.OrdinalIgnoreCase) ||
+                   key.Equals("Content-Type", StringComparison.OrdinalIgnoreCase);
         }
     }
 }

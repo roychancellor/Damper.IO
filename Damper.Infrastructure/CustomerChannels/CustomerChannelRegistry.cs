@@ -80,7 +80,7 @@ namespace Damper.Infrastructure.CustomerChannels
                     }
                 }
 
-                pipeline = _pipelineFactory.CreatePipeline(currentConfig, _ct);
+                pipeline = _pipelineFactory.CreatePipeline(currentConfig, customerId => MarkAsSuspended(customerId), _ct);
                 if (!_registry.TryAdd(customerId, pipeline))
                 {
                     _log.Warn($"While attempting to add pipeline to registry, customer Id already existed | CUST ID: {customerId}");
