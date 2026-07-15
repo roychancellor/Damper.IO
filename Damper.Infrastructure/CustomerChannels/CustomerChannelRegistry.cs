@@ -117,6 +117,37 @@ namespace Damper.Infrastructure.CustomerChannels
                         _log.Error(ex, "Error completing channel writer during pipeline suspension for Customer {Id}", customerId);
                     }
                 }
+
+                // 1. Kick off the asynchronous self-healing cooldown task
+                // We discard the Task return object ('_ =') because this is designed as fire-and-forget.
+                // TODO: Get the cooldown duration from the customer's config (e.g., currentConfig.CircuitBreakerCooldownSeconds).
+                _ = AutoResumeAfterCooldownAsync(customerId, TimeSpan.FromMinutes(5));
+            }
+        }
+
+        /// <summary>
+        /// Non-blocking, stateless timer that handles auto-recovery.
+        /// </summary>
+        private async Task AutoResumeAfterCooldownAsync(string customerId, TimeSpan cooldown)
+        {
+            try
+            {
+                // Delay using the host application lifetime token so we don't block shutdowns
+                await Task.Delay(cooldown, _ct);
+
+                if (_suspendedCustomers.ContainsKey(customerId))
+                {
+                    _log.Warn("Circuit breaker cooldown elapsed for Customer {Id}. Attempting automatic self-healing.", customerId);
+                    ResumeCustomer(customerId);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Host application is shutting down; ignore and let the task exit cleanly
+            }
+            catch (Exception ex)
+            {
+                _log.Error(ex, "Uncaught error during the circuit breaker recovery delay for Customer {Id}.", customerId);
             }
         }
 
@@ -127,7 +158,7 @@ namespace Damper.Infrastructure.CustomerChannels
         {
             if (_suspendedCustomers.TryRemove(customerId, out _))
             {
-                _log.LogInformation("Circuit Breaker Reset. Resuming ingestion paths for Customer {Id}.", customerId);
+                _log.Info("Circuit Breaker Reset. Resuming ingestion paths for Customer {Id}.", customerId);
             }
         }
     }
