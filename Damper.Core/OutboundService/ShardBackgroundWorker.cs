@@ -26,6 +26,9 @@ namespace Damper.Core.OutboundService
         // with an ephemeral Rabbit MQ instance.
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
+            // Yield immediately to let the .NET Host startup loop process the other 15 shards without waiting
+            await Task.Yield();
+            
             _appLog.Info($"Configuring shard background worker | SHARD INDEX: {_shardIndex}");
             var factory = new ConnectionFactory { HostName = "localhost" };
             _connection = await factory.CreateConnectionAsync(stoppingToken);

@@ -39,7 +39,10 @@ try
     for (int i = 0; i < 16; i++)
     {
         int shardIndex = i;
-        builder.Services.AddHostedService(sp => new ShardBackgroundWorker(shardIndex, sp.GetRequiredService<IShardMessageProcessor>()));
+        // Using the explicit generic registration ensures Microsoft.Extensions.Hosting 
+        // correctly identifies and tracks each individual IHostedService instance.
+        builder.Services.AddTransient<IHostedService>(sp => new ShardBackgroundWorker(shardIndex, sp.GetRequiredService<IShardMessageProcessor>()));
+        //builder.Services.AddHostedService(sp => new ShardBackgroundWorker(shardIndex, sp.GetRequiredService<IShardMessageProcessor>()));
     }
     builder.Services.AddHttpClient("DamperEgress")
                     .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
