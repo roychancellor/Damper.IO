@@ -49,9 +49,9 @@ public class WebhookIngestionService : IWebhookIngestionService
             return LogAndGenerateFailureResult(rw.SetError("The incoming webhook header key cannot be null or empty", ErrorType.BadRequest));
         }
 
-        // To preserve the webhook payload byte-for-byte, convert it to a byte array, then base 64 encode the array to a string
-        var base64Body = await StreamToBase64String(rw);
-        if (string.IsNullOrEmpty(base64Body))
+        // To preserve the webhook payload byte-for-byte, convert it to a byte array
+        var rawBody = await ReadRequestBodyToMemoryAsync(rw);
+        if (rawBody.IsEmpty)
         {
             return LogAndGenerateFailureResult(rw.SetError("The incoming webhook payload cannot be null or empty", ErrorType.BadRequest));
         }
@@ -60,12 +60,11 @@ public class WebhookIngestionService : IWebhookIngestionService
 
         var toPublishEnvelope = WebhookEnvelope.BuildBase(rw)
                                                .SetDestination(customerConfig.DestinationURL)
-                                               .SetPayload(base64Body)
-                                               .SetHeaders(headerDictionary)
-                                               .Jsonify();
-        if (string.IsNullOrEmpty(toPublishEnvelope))
+                                               .SetPayload(rawBody)
+                                               .SetHeaders(headerDictionary);
+        if (toPublishEnvelope == null || toPublishEnvelope.RawPayloadBytes.IsEmpty)
         {
-            return LogAndGenerateFailureResult(rw.SetError("Unable to serialize the ingested webhook payload", ErrorType.BadRequest));
+            return LogAndGenerateFailureResult(rw.SetError("Webhook Envelope to publish is null or empty of content", ErrorType.BadRequest));
         }
 
         // By business decision, we are passing a combined token that will prevent publishing if the HTTP request
@@ -95,13 +94,12 @@ public class WebhookIngestionService : IWebhookIngestionService
         return Result<string>.Success(correlationId);
     }
 
-    private static async Task<string> StreamToBase64String(RequestWrapper rw)
+    private static async Task<ReadOnlyMemory<byte>> ReadRequestBodyToMemoryAsync(RequestWrapper rw)
     {
-        using var memoryStream = new MemoryStream();
-        await rw.RequestBody.CopyToAsync(memoryStream);
-        var rawBodyBytes = memoryStream.ToArray();
-        var base64Body = Convert.ToBase64String(rawBodyBytes);
-        return base64Body;
+        // Use ArrayPool for high-performance, non-allocating byte storage
+        var ms = new MemoryStream();
+        await rw.RequestBody.CopyToAsync(ms);
+        return ms.GetBuffer().AsMemory(0, (int)ms.Length);
     }
 
     private static Result<string> LogAndGenerateFailureResult(RequestWrapper rw)

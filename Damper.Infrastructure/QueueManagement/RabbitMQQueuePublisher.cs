@@ -57,7 +57,7 @@ namespace Damper.Infrastructure.QueueManagement
                     _channel = await _connection.CreateChannelAsync(channelOptions, pw.CancelToken);
                 }
                 _traceLog.Trace($"Converting webhook envelope payload to bytes");
-                var bodyBytes = Encoding.UTF8.GetBytes(pw.Payload);
+                var bodyBytes = pw.Payload.RawPayloadBytes;
                 _traceLog.Trace($"NUM BYTES: {bodyBytes.Length}");
                 
                 // Modern v7+ Properties Setup with async delivery tracking
@@ -70,10 +70,17 @@ namespace Damper.Infrastructure.QueueManagement
                     MessageId = pw.CorrelationId,
                     Headers = new Dictionary<string, object?>
                     {
-                        { nameof(pw.CustomerId), pw.CustomerId }
+                        { "x-damper-correlation-id", pw.CorrelationId },
+                        { "x-damper-customer-id", pw.CustomerId },
+                        { "x-damper-destination-url", pw.Payload.DestinationUrl },
+                        { "x-damper-attempt-count", pw.Payload.AttemptCount },
                     },
                     Timestamp = new AmqpTimestamp(DateTimeOffset.UtcNow.ToUnixTimeSeconds()),
                 };
+                foreach (var header in pw.Payload.Headers)
+                {
+                    properties.Headers.Add($"h_{header.Key}", header.Value);
+                }
     
                 // Modern v7+ async publishing pattern
                 _traceLog.Trace($"Publishing to exchange");

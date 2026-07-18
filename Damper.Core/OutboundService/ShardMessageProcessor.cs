@@ -27,18 +27,52 @@ namespace Damper.Core.OutboundService
             {
                 ArgumentNullException.ThrowIfNull(context, nameof(context));
 
-                _log.Debug($"Processing message | SHARD INDEX: {context.ShardIndex}");
-                var bodyBytes = ea.Body.ToArray();
-                var jsonString = Encoding.UTF8.GetString(bodyBytes);
-                var envelope = JsonSerializer.Deserialize<WebhookEnvelope>(jsonString);
-
-                if (envelope is null)
+                _log.Debug($"Processing binary message | SHARD INDEX: {context.ShardIndex}");
+                var amqpHeaders = ea.BasicProperties.Headers;
+                if (amqpHeaders == null)
                 {
-                    _log.Error($"After deserializing the WebhookEnvelope payload, envelope is null. Rejecting.");
-                    _log.Debug($"Payload: {jsonString}");
+                    _log.Error("Message is missing AMQP headers. Rejecting.");
                     await context.RejectAsync(ea.DeliveryTag, requeue: false);
                     return;
                 }
+
+                // Helper to safely extract string values from RabbitMQ's binary header table
+                string GetStringHeader(string key)
+                {
+                    return amqpHeaders.TryGetValue(key, out var val) && val is byte[] bytes
+                        ? Encoding.UTF8.GetString(bytes)
+                        : string.Empty;
+                }
+
+                // 1. Rebuild the Webhook Envelope from Native AMQP properties (Zero-JSON)
+                var customerId = GetStringHeader("x-damper-customer-id");
+                var destinationUrl = GetStringHeader("x-damper-destination-url");
+                var correlationId = GetStringHeader("x-damper-correlation-id");
+                
+                int attemptCount = amqpHeaders.TryGetValue("x-damper-attempt-count", out var attemptObj)
+                    ? Convert.ToInt32(attemptObj)
+                    : 1;
+
+                var envelopeHeaders = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var (key, value) in amqpHeaders)
+                {
+                    // Reassemble original forwarded client headers prefixed with 'h_'
+                    if (key.StartsWith("h_") && value is byte[] headerValueBytes)
+                    {
+                        envelopeHeaders[key[2..]] = Encoding.UTF8.GetString(headerValueBytes);
+                    }
+                }
+
+                var envelope = new WebhookEnvelope
+                {
+                    CorrelationId = correlationId,
+                    CustomerId = customerId,
+                    DestinationUrl = destinationUrl,
+                    Headers = envelopeHeaders,
+                    AttemptCount = attemptCount,
+                    ReceivedAt = DateTime.UtcNow,
+                    RawPayloadBytes = ea.Body // Holds the zero-copy binary reference directly from RabbitMQ
+                };
 
                 // Rent an execution context from the pool instead of instantiating an anonymous lambda closure
                 ackContext = _contextPool.Get();

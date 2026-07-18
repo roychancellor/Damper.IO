@@ -113,7 +113,7 @@ namespace Damper.Infrastructure.CustomerChannels
             catch (Exception ex)
             {
                 // Do not crash the entire consumer if the repository is temporarily down
-                _log.LogWarning(ex, "Failed to refresh pacing configuration for customer {CustomerId}. Maintaining last known state.", _customerId);
+                _log.Warn("Failed to refresh pacing configuration for customer {CustomerId}. Maintaining last known state.", _customerId, ex);
             }
         }
         
@@ -126,17 +126,15 @@ namespace Damper.Infrastructure.CustomerChannels
                 int maxAttempts = 5;
                 TimeSpan retryBackoff = TimeSpan.FromSeconds(2);
 
-                byte[] rawBytes = Convert.FromBase64String(envelope.Base64Payload);
-
                 while (!delivered && envelope.AttemptCount <= maxAttempts)
                 {
                     var client = _httpClientFactory.CreateClient("DamperEgress");
                     using var request = new HttpRequestMessage(HttpMethod.Post, config.DestinationURL);
-                    request.Content = new ByteArrayContent(rawBytes);
+                    request.Content = new ReadOnlyMemoryContent(envelope.RawPayloadBytes);
 
                     foreach (var header in envelope.Headers)
                     {
-                        if (IsSystemHeader(header.Key)) continue;
+                        if (IsSystemHeader(header.Key)) { continue; }
                         request.Headers.TryAddWithoutValidation(header.Key, header.Value);
                     }
 

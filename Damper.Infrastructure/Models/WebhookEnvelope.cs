@@ -1,5 +1,9 @@
 using System.Text.Json;
 
+/***************************************************************************************************************************/
+// TODO: CONVERT ENTIRE DATA TRANSMISSION PATH TO RAW BYTES. REFER TO GEMINI: https://gemini.google.com/app/e3be0124a487526e
+/***************************************************************************************************************************/
+
 namespace Damper.Infrastructure.Models
 {
     public class WebhookEnvelope
@@ -7,10 +11,10 @@ namespace Damper.Infrastructure.Models
         public string CorrelationId { get; set; } = "";
         public string CustomerId { get; set; } = "";
         public string DestinationUrl { get; set; } = "";
-        public string Base64Payload { get; set; } = "";
+        public ReadOnlyMemory<byte> RawPayloadBytes { get; set; }
         public Dictionary<string, string> Headers { get; set; } = [];
         public DateTime ReceivedAt { get; set; }
-        public int AttemptCount { get; set; }
+        public int AttemptCount { get; set; } = 1;
        
         // Uee a Webhook Ack Context that will come from an object pool to
         // eliminate the use of an anonymous "OnProcessingCompleteAsync" lambda
@@ -34,9 +38,9 @@ namespace Damper.Infrastructure.Models
             return this;
         }
 
-        public WebhookEnvelope SetPayload(string toSet)
+        public WebhookEnvelope SetPayload(ReadOnlyMemory<byte> toSet)
         {
-            Base64Payload = toSet;
+            RawPayloadBytes = toSet;
             return this;
         }
 
@@ -44,19 +48,6 @@ namespace Damper.Infrastructure.Models
         {
             Headers = toSet;
             return this;
-        }
-
-        public string Jsonify()
-        {
-            try
-            {
-                var toReturn = JsonSerializer.Serialize(this);
-                return toReturn;
-            }
-            catch (Exception)
-            {
-                return string.Empty;
-            }
         }
     }
 }
