@@ -1,8 +1,9 @@
 using System.Text;
-using System.Text.Json;
+using System.Threading.Channels;
 using Damper.Infrastructure.ChannelRegistry;
 using Damper.Infrastructure.Logging;
 using Damper.Infrastructure.Models;
+using Damper.Infrastructure.Observability;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.ObjectPool;
 using RabbitMQ.Client.Events;
@@ -23,6 +24,7 @@ namespace Damper.Core.OutboundService
         public async Task ProcessMessageAsync(BasicDeliverEventArgs ea, IShardProcessingContext context)
         {
             WebhookAckContext? ackContext = null;
+            WebhookEnvelope envelope = new();
             try
             {
                 ArgumentNullException.ThrowIfNull(context, nameof(context));
@@ -36,7 +38,6 @@ namespace Damper.Core.OutboundService
                     return;
                 }
 
-                // Helper to safely extract string values from RabbitMQ's binary header table
                 string GetStringHeader(string key)
                 {
                     return amqpHeaders.TryGetValue(key, out var val) && val is byte[] bytes
@@ -44,7 +45,6 @@ namespace Damper.Core.OutboundService
                         : string.Empty;
                 }
 
-                // 1. Rebuild the Webhook Envelope from Native AMQP properties (Zero-JSON)
                 var customerId = GetStringHeader("x-damper-customer-id");
                 var destinationUrl = GetStringHeader("x-damper-destination-url");
                 var correlationId = GetStringHeader("x-damper-correlation-id");
@@ -56,14 +56,13 @@ namespace Damper.Core.OutboundService
                 var envelopeHeaders = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var (key, value) in amqpHeaders)
                 {
-                    // Reassemble original forwarded client headers prefixed with 'h_'
                     if (key.StartsWith("h_") && value is byte[] headerValueBytes)
                     {
                         envelopeHeaders[key[2..]] = Encoding.UTF8.GetString(headerValueBytes);
                     }
                 }
 
-                var envelope = new WebhookEnvelope
+                envelope = new WebhookEnvelope
                 {
                     CorrelationId = correlationId,
                     CustomerId = customerId,
@@ -71,10 +70,9 @@ namespace Damper.Core.OutboundService
                     Headers = envelopeHeaders,
                     AttemptCount = attemptCount,
                     ReceivedAt = DateTime.UtcNow,
-                    RawPayloadBytes = ea.Body // Holds the zero-copy binary reference directly from RabbitMQ
+                    RawPayloadBytes = ea.Body 
                 };
 
-                // Rent an execution context from the pool instead of instantiating an anonymous lambda closure
                 ackContext = _contextPool.Get();
                 ackContext.DeliveryTag = ea.DeliveryTag;
                 ackContext.ShardIndex = context.ShardIndex;
@@ -83,47 +81,90 @@ namespace Damper.Core.OutboundService
                 envelope.AckContext = ackContext;
 
                 _log.Debug($"Getting customer channel | CUST ID: {envelope.CustomerId} | DEL TAG: {ea.DeliveryTag}");
-                var writer = await _channelRegistry.GetOrCreateChannel(envelope.CustomerId);
+                var pipeline = await _channelRegistry.GetOrCreatePipelineAsync(envelope.CustomerId);
                 
-                _log.Debug($"Attempting non-blocking write to customer channel | CUST ID: {envelope.CustomerId} | DEL TAG: {ea.DeliveryTag}");
-                
-                // Use TryWrite instead of an awaited WriteAsync to eliminate Head-of-Line blocking
-                if (!writer.TryWrite(envelope))
+                // SELF-HEALING: If infrastructure is dead, reset registry and NACK for retry
+                if (pipeline.BackgroundTask.IsCompleted)
                 {
-                    _log.LogWarning("Customer {Id} buffer is full or suspended. NACKing message to free up Shard {Idx}.", envelope.CustomerId, context.ShardIndex);
-
-                    // Return the context to the pool immediately since the message is going back to the broker
-                    _contextPool.Return(ackContext);
-
-                    // Return the message to the broker so other customers' traffic can pass through
+                    _log.Warn("Pipeline is dead for {Id}. Resetting registry and NACKing for retry.", envelope.CustomerId);
+                    _channelRegistry.ResetPipeline(envelope.CustomerId);
                     await context.NackAsync(ea.DeliveryTag, multiple: false, requeue: true);
-
-                    // Small 50ms pause prevents this specific shard thread from hammering RabbitMQ 
-                    // in a tight loop if the queue contains only this blocked customer's data.
-                    await Task.Delay(50);
+                    _contextPool.Return(ackContext);
                     return;
                 }
+
+                _log.Debug($"Attempting non-blocking write to customer channel | CUST ID: {envelope.CustomerId} | DEL TAG: {ea.DeliveryTag}");
                 
-                _log.Debug($"Successfully enqueued envelope | CUST ID: {envelope.CustomerId} | DEL TAG: {ea.DeliveryTag}");
+                var parkedAt = DateTime.UtcNow;
+                var maxParkingDuration = TimeSpan.FromMinutes(5);
+
+                while (_channelRegistry.IsSuspended(envelope.CustomerId))
+                {
+                    if (StayLimitExceeded(parkedAt, maxParkingDuration))
+                    {
+                        _log.Warn("Parking limit exceeded for {Id}. Moving to DLQ.", envelope.CustomerId);
+                        await context.MoveToDeadLetterAsync(envelope);
+                        DamperMetrics.DeadLetterCounter.Add(1, 
+                            new KeyValuePair<string, object?>("customer_id", envelope.CustomerId),
+                            new KeyValuePair<string, object?>("reason", "parking-limit-exceeded"));
+                        await context.AckAsync(ea.DeliveryTag);
+                        _contextPool.Return(ackContext);
+                        return;
+                    }
+                    await Task.Delay(TimeSpan.FromSeconds(30), context.StoppingToken);
+                }
+
+                var canWrite = await pipeline.Writer.WaitToWriteAsync(new CancellationTokenSource(1000).Token);
+
+                if (canWrite && !pipeline.BackgroundTask.IsCompleted && pipeline.Writer.TryWrite(envelope))
+                {
+                    // DO NOT ACK HERE!!! LET THE CHANNEL DISPATCHER HANDLE THE ACK WHEN IT KNOW THE OUTCOME
+                    _log.Info($"Successfully enqueued envelope | CUST ID: {envelope.CustomerId} | DELIVERY TAG: {ea.DeliveryTag}");
+                }
+                else
+                {
+                    if (pipeline.BackgroundTask.IsCompleted)
+                    {
+                        _log.Warn("Pipeline crashed during wait for {Id}. Resetting registry and NACKing.", envelope.CustomerId);
+                        _channelRegistry.ResetPipeline(envelope.CustomerId);
+                        await context.NackAsync(ea.DeliveryTag, multiple: false, requeue: true);
+                    }
+                    else
+                    {
+                        _log.Warn("Customer {Id} buffer is full or suspended. NACKing message to free up Shard {Idx}.", envelope.CustomerId, context.ShardIndex);
+                        await context.NackAsync(ea.DeliveryTag, multiple: false, requeue: true);
+                    }
+                    _contextPool.Return(ackContext);
+                }
             }
             catch (ArgumentNullException aex)
             {
-                if (ackContext != null)
-                {
-                    _contextPool.Return(ackContext);
-                }
+                if (ackContext != null) _contextPool.Return(ackContext);
                 _log.Error($"While attempting to process message - argument is null - unable to proceed. | MSG: {aex.Message}");
                 throw;
             }
+            catch (ChannelClosedException)
+            {
+                _log.Warn("Attempted to write to a closed channel for {Id}.", envelope.CustomerId);
+                _channelRegistry.ResumeCustomer(envelope.CustomerId);
+                throw;
+            }
+            catch (OperationCanceledException)
+            {
+                _log.Warn($"ShardMessageProcessor: Shutdown requested");
+                return;
+            }
             catch (Exception ex)
             {
-                if (ackContext != null)
-                {
-                    _contextPool.Return(ackContext);
-                }
+                if (ackContext != null) _contextPool.Return(ackContext);
                 _log.Error(ex, "Fatal error on shard parsing layer {Idx}. NACKing message.", context.ShardIndex);
                 await context.NackAsync(ea.DeliveryTag, multiple: false, requeue: true);
             }
+        }
+
+        private static bool StayLimitExceeded(DateTime parkedAt, TimeSpan maxParkingDuration)
+        {
+            return DateTime.UtcNow - parkedAt > maxParkingDuration;
         }
     }
 }

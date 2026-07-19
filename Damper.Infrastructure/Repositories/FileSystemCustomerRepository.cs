@@ -7,9 +7,9 @@ public class FileSystemCustomerRepository : ICustomerRepository
         // TODO: Actually go get config from file system
         return await Task.FromResult(new CustomerConfig
         {
-            CustomerId = "ABC123",
+            CustomerId = "ABC123_400",
             WebhookHeaderKey = "X-Webhook-Header",
-            DestinationURL = "https://customer.endpoint/webhook/post",
+            DestinationURL = "http://httpbin.org/status/400",
             DeliveryRate = 5,
             DeliveryIntervalMillis = 1000,
         });

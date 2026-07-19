@@ -4,13 +4,15 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
+using RabbitMQ.Client.Exceptions;
 
 namespace Damper.Core.OutboundService
 {
     public class ShardBackgroundWorker : BackgroundService
     {
         private static readonly ILogger _appLog = Loggers.Application;
-        
+         private static readonly ILogger _reqLog = Loggers.Request;
+       
         private readonly int _shardIndex;
         private readonly IShardMessageProcessor _messageProcessor;
         private IConnection? _connection;
@@ -34,11 +36,28 @@ namespace Damper.Core.OutboundService
             _connection = await factory.CreateConnectionAsync(stoppingToken);
             _channel = await _connection.CreateChannelAsync(cancellationToken: stoppingToken);
 
+            //TODO: Put these into appsettings
             var queueName = $"damper.webhook.queue.shard_{_shardIndex:D2}";
+            var dlxName = "damper.dlx";
+            var dlqName = "damper.webhook.queue.dead_letter";
+
+            try
+            {
+                // Verify the infrastructure exists (Fail-fast if missing)
+                await _channel.ExchangeDeclarePassiveAsync(dlxName, cancellationToken: stoppingToken);
+                await _channel.QueueDeclarePassiveAsync(dlqName, cancellationToken: stoppingToken);
+                await _channel.QueueDeclarePassiveAsync(queueName, cancellationToken: stoppingToken);
+            }
+            catch (OperationInterruptedException ex)
+            {
+                _appLog.Error(ex, "Required RabbitMQ infrastructure is missing for shard {Index:D2}. Pre-provision queues and exchanges.", _shardIndex);
+                throw; // Stop the service if dependencies are missing
+            }
+
             await _channel.BasicQosAsync(0, 30, false, stoppingToken);
 
             // Build the bridge context inside the runtime loop execution thread
-            var processingContext = new RuntimeProcessingContext(_shardIndex, _channel);
+            var processingContext = new RuntimeProcessingContext(_shardIndex, _channel, stoppingToken);
 
             var consumer = new AsyncEventingBasicConsumer(_channel);
             consumer.ReceivedAsync += (sender, ea) => _messageProcessor.ProcessMessageAsync(ea, processingContext);
@@ -54,16 +73,61 @@ namespace Damper.Core.OutboundService
         {
             private readonly IChannel _channel;
             public int ShardIndex { get; }
+            private CancellationToken _stoppingToken;
+            public CancellationToken StoppingToken => _stoppingToken;
 
-            public RuntimeProcessingContext(int shardIndex, IChannel channel)
+            public RuntimeProcessingContext(int shardIndex, IChannel channel, CancellationToken stoppingToken)
             {
                 ShardIndex = shardIndex;
                 _channel = channel;
+                _stoppingToken = stoppingToken;
             }
 
             public async Task AckAsync(ulong deliveryTag) => await _channel.BasicAckAsync(deliveryTag, multiple: false);
-            public async Task RejectAsync(ulong deliveryTag, bool requeue) => await _channel.BasicRejectAsync(deliveryTag, requeue);
+            public async Task RejectAsync(ulong deliveryTag, bool requeue) 
+            {
+                if (_channel.IsOpen) {
+                    await _channel.BasicRejectAsync(deliveryTag, requeue);
+                } else {
+                    // This is why your messages are disappearing! 
+                    // The channel died before you could Nack.
+                    _reqLog.Error($"CANNOT NACK: CHANNEL IS CLOSED!!!");
+                    throw new InvalidOperationException("Cannot Nack: Channel is closed.");
+                }
+            }
             public async Task NackAsync(ulong deliveryTag, bool multiple, bool requeue) => await _channel.BasicNackAsync(deliveryTag, multiple, requeue);
+
+            public async Task MoveToDeadLetterAsync(WebhookEnvelope envelope)
+            {
+                // TODO: create a Constants class or put these in appsettings
+                const string dlxExchange = "damper.dlx";
+                const string dlqRoutingKey = "dead-letter";
+
+                // 1. Create message properties
+                // Important: Re-use the original message properties (headers, persistence, etc.)
+                var props = new BasicProperties
+                {
+                    Persistent = true,
+                    Headers = new Dictionary<string, object?>
+                    {
+                        { "x-original-reason", "parking-limit-exceeded" },
+                        { "x-failed-at", DateTime.UtcNow.ToString("O") },
+                        { "x-customer-id", envelope.CustomerId }
+                    }
+                };
+
+                // 2. Publish to the Dead Letter Exchange
+                // We send the original payload bytes to ensure the DLQ message is an exact replica
+                await _channel.BasicPublishAsync(
+                    exchange: dlxExchange,
+                    routingKey: dlqRoutingKey,
+                    mandatory: true,
+                    basicProperties: props,
+                    body: envelope.RawPayloadBytes // Ensure you have access to the original bytes
+                );
+                
+                _reqLog.LogInformation("Message for customer {Id} successfully moved to DLQ.", envelope.CustomerId);
+            }
         }
 
         public override async Task StopAsync(CancellationToken cancellationToken)

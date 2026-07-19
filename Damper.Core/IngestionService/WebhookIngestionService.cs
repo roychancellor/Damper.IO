@@ -4,6 +4,8 @@ using Microsoft.Extensions.Hosting;
 using Damper.Infrastructure.QueueManagement;
 using Damper.Infrastructure.Logging;
 using Damper.Infrastructure.Models;
+using Microsoft.Extensions.Primitives;
+using System.Net.Http.Headers;
 
 namespace Damper.Core.IngestionService;
 
@@ -47,6 +49,24 @@ public class WebhookIngestionService : IWebhookIngestionService
         if (string.IsNullOrEmpty(incomingSignature))
         {
             return LogAndGenerateFailureResult(rw.SetError("The incoming webhook header key cannot be null or empty", ErrorType.BadRequest));
+        }
+
+        // Verify the Content-Type header is parsable as a known type, as the dispatcher needs it to be correct
+        // to send a valid request to the customer. Checking here allows for HTTP 400 if it is not parsable.
+        var contentTypeExists = rw.HttpHeaders.TryGetValue("Content-Type", out StringValues contentTypeReceived);
+        if (contentTypeExists)
+        {
+            // Check for multiple Content-Type headers - a violation
+            if (contentTypeReceived.Count > 1)
+            {
+                return LogAndGenerateFailureResult(rw.SetError($"The incoming webhook has multiple Content-Type header entries | HDR: {contentTypeReceived}",
+                                                   ErrorType.BadRequest));
+            }
+            if (!MediaTypeHeaderValue.TryParse(contentTypeReceived, out _))
+            {
+                return LogAndGenerateFailureResult(rw.SetError($"The incoming webhook Content-Type header is unparsable | HDR: {contentTypeReceived}",
+                                                   ErrorType.BadRequest));
+            }
         }
 
         // To preserve the webhook payload byte-for-byte, convert it to a byte array

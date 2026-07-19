@@ -11,6 +11,9 @@ using Damper.Infrastructure.CustomerChannels;
 using Damper.Infrastructure.ChannelRegistry;
 using Damper.Core.OutboundService;
 using Microsoft.Extensions.ObjectPool;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Instrumentation.Runtime;
 
 var bootstrapLogger = LogManager.Setup().GetCurrentClassLogger();
 
@@ -65,6 +68,30 @@ try
         var provider = sp.GetRequiredService<ObjectPoolProvider>();
         return provider.Create<WebhookAckContext>();
     });
+
+    // Configure OpenTelemetry
+    builder.Services.AddOpenTelemetry()
+        .ConfigureResource(resource => resource.AddService("Damper.OutboundService"))
+        .WithMetrics(metrics =>
+        {
+            // Enable built-in .NET runtime metrics
+            metrics.AddRuntimeInstrumentation();
+            
+            // ENABLE CUSTOM METRICS: Must match the string used in: new Meter("Damper.Core", "1.0.0");
+            // TODO: Add this to Constants class or appsettings
+            metrics.AddMeter("Damper.Core");
+
+            // 3. Export to OTLP (e.g., to an OTel Collector, Jaeger, or Honeycomb)
+            metrics.AddOtlpExporter(options =>
+            {
+                // Set your collector endpoint (default is usually http://localhost:4317)
+                // TODO: Add this to appsettings
+                options.Endpoint = new Uri(builder.Configuration["Otlp:Endpoint"] ?? "http://localhost:4317");
+                
+                // If using HTTP instead of gRPC, set this:
+                // options.Protocol = OpenTelemetry.Exporter.OtlpExportProtocol.HttpProtobuf;
+            });
+        });
 
     bootstrapLogger.Info($"BUILDING APPLICATION");
     var app = builder.Build();
