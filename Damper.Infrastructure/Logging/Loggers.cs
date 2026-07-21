@@ -5,12 +5,21 @@ namespace Damper.Infrastructure.Logging;
 
 public static class Loggers
 {
-  private static ILoggerFactory? _factory;
+    private static ILogger _application = NullLogger.Instance;
+    private static ILogger _request = NullLogger.Instance;
+    private static ILogger _health = NullLogger.Instance;
+    private static ILogger _requestTrace = NullLogger.Instance;
+    
+    public static void Initialize(ILoggerFactory factory)
+    {
+      _application = factory.CreateLogger("Application");
+      _request = factory.CreateLogger("Request");
+      _health = factory.CreateLogger("Health");
+      _requestTrace = factory.CreateLogger("RequestTrace");
+    }
 
-    public static void Initialize(ILoggerFactory factory) => _factory = factory;
-
-    public static ILogger Application => _factory?.CreateLogger("Application") ?? NullLogger.Instance;
-    public static ILogger Request => _factory?.CreateLogger("Request") ?? NullLogger.Instance;
-    public static ILogger Health => _factory?.CreateLogger("Health") ?? NullLogger.Instance;
-    public static ILogger RequestTrace => _factory?.CreateLogger("RequestTrace") ?? NullLogger.Instance;
+    public static ILogger Application => _application;
+    public static ILogger Request => _request;
+    public static ILogger Health => _health;
+    public static ILogger RequestTrace => _requestTrace;
 }

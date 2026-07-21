@@ -24,6 +24,7 @@ namespace Damper.Infrastructure.CustomerChannels
 
         public CustomerEgressPipeline CreatePipeline(CustomerConfig customerConfig, Action<string> onSuspensionTriggered, CancellationToken ct)
         {
+            // TODO: Get default max queue capacity from config
             var bufferSize = customerConfig.MaxQueueCapacity > 0 ? customerConfig.MaxQueueCapacity : 5000;
             
             var channelOptions = new BoundedChannelOptions(bufferSize)
@@ -54,7 +55,7 @@ namespace Damper.Infrastructure.CustomerChannels
                 catch (OperationCanceledException ocex) 
                 { 
                     tcs.SetException(ocex);
-                    _log.Info("Dispatcher loop cancelled for customer."); 
+                    _log.Info($"Dispatcher loop cancelled for customer | CUST ID: {customerConfig.CustomerId}"); 
                 }
                 catch (Exception ex) 
                 {

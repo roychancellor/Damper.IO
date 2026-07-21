@@ -9,6 +9,7 @@ namespace Damper.Infrastructure.QueueManagement
 {
     public class RabbitMQQueuePublisher : IQueuePublisher, IDisposable
     {
+        private static ILogger _log = Loggers.Request;
         private static ILogger _traceLog = Loggers.RequestTrace;
         private IConnection _connection;
         private IChannel? _channel;
@@ -29,7 +30,7 @@ namespace Damper.Infrastructure.QueueManagement
                 _traceLog.Trace($"Starting publish");
                 if (pw == null)
                 {
-                    _traceLog.Error($"PublishAsync - passed in Publish Wrapper is NULL");
+                    _log.Error($"While attempting to publish - passed in Publish Wrapper is NULL");
                     throw new ArgumentNullException(nameof(pw), "Publish Wrapper cannot be null.");
                 }
                 _traceLog.Trace($"Received Publish Wrapper: {pw}");
@@ -41,27 +42,29 @@ namespace Damper.Infrastructure.QueueManagement
                 }
                 
                 // Lazily initialize the channel for this HTTP request scope if it doesn't exist
-                _traceLog.Trace($"Awaiting channel semaphore");
+                _traceLog.Trace($"Awaiting queue channel semaphore");
                 await _channelSemaphore.WaitAsync();
                 if (_channel == null || !_channel.IsOpen)
                 {
                     if (_channel != null)
                     {
-                        _traceLog.Trace($"Disposing of non-null, but non-open channel");
+                        _traceLog.Trace($"Disposing of non-null, but non-open queue channel");
                         await _channel.DisposeAsync();
                     }
 
+                    _traceLog.Trace($"Creating queue channel options - confirmations and tracking are enabled");
                     var channelOptions = new CreateChannelOptions(publisherConfirmationsEnabled: true, publisherConfirmationTrackingEnabled: true);
 
-                    _traceLog.Trace($"Creating channel");
+                    _traceLog.Trace($"Creating queue channel");
                     _channel = await _connection.CreateChannelAsync(channelOptions, pw.CancelToken);
                 }
+                
                 _traceLog.Trace($"Converting webhook envelope payload to bytes");
                 var bodyBytes = pw.Payload.RawPayloadBytes;
                 _traceLog.Trace($"NUM BYTES: {bodyBytes.Length}");
                 
                 // Modern v7+ Properties Setup with async delivery tracking
-                _traceLog.Trace($"Creating Basic Properties object");
+                _traceLog.Trace($"Creating Basic Properties object with headers");
                 var properties = new BasicProperties
                 {
                     ContentType = "application/json",
@@ -77,6 +80,7 @@ namespace Damper.Infrastructure.QueueManagement
                     },
                     Timestamp = new AmqpTimestamp(DateTimeOffset.UtcNow.ToUnixTimeSeconds()),
                 };
+                _traceLog.Trace($"Mapping wekhook request headers to queue message headers for binary transport");
                 foreach (var header in pw.Payload.Headers)
                 {
                     properties.Headers.Add($"h_{header.Key}", header.Value);

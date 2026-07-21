@@ -12,6 +12,8 @@ namespace Damper.Core.IngestionService;
 public class WebhookIngestionService : IWebhookIngestionService
 {
     private static readonly ILogger _log = Loggers.Request;
+    private static readonly ILogger _traceLog = Loggers.RequestTrace;
+
     private readonly IHostApplicationLifetime _appLifetime;
     
     private readonly ICustomerRepository _customerRepo;
@@ -26,6 +28,8 @@ public class WebhookIngestionService : IWebhookIngestionService
 
     public async Task<Result<string>> ProcessIngressAsync(RequestWrapper rw)
     {
+        _traceLog.Trace($"====> ProcessIngressAsync STARTING");
+
         if (rw == null || !rw.IsProcessable())
         {
             var msg = $"The incoming webhook request is null or unprocessable";
@@ -36,6 +40,7 @@ public class WebhookIngestionService : IWebhookIngestionService
         var correlationId = rw.CorrelationId;
 
         _log.Info($"====> New webhook request received | CUSTOMER: {customerId}");
+        _traceLog.Trace($"Getting customer config from repo | CUST ID: {customerId}");
         var customerConfig = await _customerRepo.GetByIdAsync(customerId, rw.CancelToken);
         if (customerConfig == null)
         {
@@ -56,6 +61,7 @@ public class WebhookIngestionService : IWebhookIngestionService
         var contentTypeExists = rw.HttpHeaders.TryGetValue("Content-Type", out StringValues contentTypeReceived);
         if (contentTypeExists)
         {
+            _traceLog.Trace($"Request has Content-Type = {contentTypeReceived}");
             // Check for multiple Content-Type headers - a violation
             if (contentTypeReceived.Count > 1)
             {
@@ -70,14 +76,17 @@ public class WebhookIngestionService : IWebhookIngestionService
         }
 
         // To preserve the webhook payload byte-for-byte, convert it to a byte array
+        _traceLog.Trace($"Reading request body to bytes");
         var rawBody = await ReadRequestBodyToMemoryAsync(rw);
         if (rawBody.IsEmpty)
         {
             return LogAndGenerateFailureResult(rw.SetError("The incoming webhook payload cannot be null or empty", ErrorType.BadRequest));
         }
+        _traceLog.Trace($"Read request body successfully | NUM BYTES: {rawBody.Length}");
 
         var headerDictionary = rw.HttpHeaders.ToDictionary(h => h.Key, h => h.Value.ToString());
 
+        _traceLog.Trace($"Building Webhook Envelope");
         var toPublishEnvelope = WebhookEnvelope.BuildBase(rw)
                                                .SetDestination(customerConfig.DestinationURL)
                                                .SetPayload(rawBody)
@@ -93,10 +102,12 @@ public class WebhookIngestionService : IWebhookIngestionService
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(rw.CancelToken, _appLifetime.ApplicationStopping);
         try
         {
+            _traceLog.Trace($"Building Publish Wrapper and publishing to queue");
             var pw = PublishWrapper.BuildBase(linkedCts.Token, shouldThrow: true)
                                    .SetCorrelationID(correlationId)
                                    .SetCustomerID(customerId)
                                    .SetPayload(toPublishEnvelope);
+            
             var isPublishSuccessful = await _queuePublisher.PublishAsync(pw);
             if (!isPublishSuccessful)
             {
@@ -109,7 +120,8 @@ public class WebhookIngestionService : IWebhookIngestionService
             throw;
         }
 
-        // Success! Return a tracking ID back to the API
+        // Success! Return a tracking ID (correlation ID) back to the API
+        _traceLog.Trace($"<==== ProcessIngressAsync FINISHED | CUSTOMER: {customerId}");
         _log.Info($"<==== Webhook request processed | CUSTOMER: {customerId}");
         return Result<string>.Success(correlationId);
     }

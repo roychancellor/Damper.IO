@@ -11,7 +11,8 @@ namespace Damper.Core.OutboundService
     public class ShardBackgroundWorker : BackgroundService
     {
         private static readonly ILogger _appLog = Loggers.Application;
-         private static readonly ILogger _reqLog = Loggers.Request;
+        private static readonly ILogger _reqLog = Loggers.Request;
+        private static readonly ILogger _traceLog = Loggers.RequestTrace;
        
         private readonly int _shardIndex;
         private readonly IShardMessageProcessor _messageProcessor;
@@ -36,7 +37,7 @@ namespace Damper.Core.OutboundService
             _connection = await factory.CreateConnectionAsync(stoppingToken);
             _channel = await _connection.CreateChannelAsync(cancellationToken: stoppingToken);
 
-            //TODO: Put these into appsettings
+            //TODO: Put the Rabbit MQ exchange and queue names into appsettings
             var queueName = $"damper.webhook.queue.shard_{_shardIndex:D2}";
             var dlxName = "damper.dlx";
             var dlqName = "damper.webhook.queue.dead_letter";
@@ -54,6 +55,7 @@ namespace Damper.Core.OutboundService
                 throw; // Stop the service if dependencies are missing
             }
 
+            // TODO: Put the prefetch count in appsettings
             await _channel.BasicQosAsync(0, 30, false, stoppingToken);
 
             // Build the bridge context inside the runtime loop execution thread
@@ -63,7 +65,7 @@ namespace Damper.Core.OutboundService
             consumer.ReceivedAsync += (sender, ea) => _messageProcessor.ProcessMessageAsync(ea, processingContext);
 
             await _channel.BasicConsumeAsync(queueName, autoAck: false, consumer, stoppingToken);
-            _appLog.Info("Shard consumer thread {Index:D2} bound to {QueueName}", _shardIndex, queueName);
+            _appLog.Info("Shard consumer thread bound to queue | SHARD {Index:D2} --> QUEUE {QueueName}", _shardIndex, queueName);
             
             await Task.Delay(Timeout.Infinite, stoppingToken);
         }
@@ -86,11 +88,13 @@ namespace Damper.Core.OutboundService
             public async Task AckAsync(ulong deliveryTag) => await _channel.BasicAckAsync(deliveryTag, multiple: false);
             public async Task RejectAsync(ulong deliveryTag, bool requeue) 
             {
-                if (_channel.IsOpen) {
+                if (_channel.IsOpen)
+                {
+                    _traceLog.Trace($"Rejecting message! | DEL TAG: {deliveryTag} | REQUEUE: {requeue}");
                     await _channel.BasicRejectAsync(deliveryTag, requeue);
-                } else {
-                    // This is why your messages are disappearing! 
-                    // The channel died before you could Nack.
+                }
+                else
+                {
                     _reqLog.Error($"CANNOT NACK: CHANNEL IS CLOSED!!!");
                     throw new InvalidOperationException("Cannot Nack: Channel is closed.");
                 }
@@ -103,7 +107,7 @@ namespace Damper.Core.OutboundService
                 const string dlxExchange = "damper.dlx";
                 const string dlqRoutingKey = "dead-letter";
 
-                // 1. Create message properties
+                // Create message properties
                 // Important: Re-use the original message properties (headers, persistence, etc.)
                 var props = new BasicProperties
                 {
@@ -116,24 +120,24 @@ namespace Damper.Core.OutboundService
                     }
                 };
 
-                // 2. Publish to the Dead Letter Exchange
-                // We send the original payload bytes to ensure the DLQ message is an exact replica
+                // Publish to the Dead Letter Exchange
+                // Send the original payload bytes to ensure the DLQ message is an exact replica
                 await _channel.BasicPublishAsync(
                     exchange: dlxExchange,
                     routingKey: dlqRoutingKey,
                     mandatory: true,
                     basicProperties: props,
-                    body: envelope.RawPayloadBytes // Ensure you have access to the original bytes
+                    body: envelope.RawPayloadBytes // Ensure there is access to the original bytes
                 );
                 
-                _reqLog.LogInformation("Message for customer {Id} successfully moved to DLQ.", envelope.CustomerId);
+                _reqLog.Info("Message for customer successfully moved to DLQ. | CUST ID: {Id}", envelope.CustomerId);
             }
         }
 
         public override async Task StopAsync(CancellationToken cancellationToken)
         {
-            if (_channel is not null) await _channel.CloseAsync(cancellationToken);
-            if (_connection is not null) await _connection.CloseAsync(cancellationToken);
+            if (_channel is not null) { await _channel.CloseAsync(cancellationToken); }
+            if (_connection is not null) { await _connection.CloseAsync(cancellationToken); }
             await base.StopAsync(cancellationToken);
         }
     }

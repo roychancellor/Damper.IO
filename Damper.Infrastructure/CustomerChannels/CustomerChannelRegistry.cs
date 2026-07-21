@@ -13,6 +13,7 @@ namespace Damper.Infrastructure.CustomerChannels
     public class CustomerChannelRegistry : IChannelRegistry
     {
         private static readonly ILogger _log = Loggers.Request;
+        private static readonly ILogger _traceLog = Loggers.RequestTrace;
 
         private readonly ConcurrentDictionary<string, CustomerEgressPipeline> _registry = new();
         
@@ -45,6 +46,7 @@ namespace Damper.Infrastructure.CustomerChannels
             // 1. FAST CIRCUIT PATH: Check suspension state instantly without touching any pipelines or dictionary lookups
             if (_suspendedCustomers.ContainsKey(customerId))
             {
+                _log.Warn($"While attempting to get or create customer pipeline - customer is suspended | CUST ID: {customerId}");
                 return _suspendedPipeline;
             }
 
@@ -60,7 +62,7 @@ namespace Damper.Infrastructure.CustomerChannels
                 }
                 else
                 {
-                    _log.Debug($"Channel registry HIT for customer ID {customerId} - returning writer immediately");
+                    _traceLog.Trace($"Channel registry HIT for customer ID {customerId} - returning writer immediately");
                     return pipeline; // Pipeline is healthy and running
                 }
             }
@@ -70,40 +72,43 @@ namespace Damper.Infrastructure.CustomerChannels
             CustomerConfig? currentConfig;
             try
             {
+                _log.Warn($"Registry miss - attempting to lock and build the pipeline safely | CUST ID: {customerId}");
                 // Double-check lock mitigation pattern
                 if (_registry.TryGetValue(customerId, out pipeline))
                 {
                     if (pipeline.BackgroundTask.IsCompleted)
                     {
-                        _log.Warn("Stale/Dead pipeline detected for CUSTOMER ID {Id}. Evicting.", customerId);
+                        _log.Warn("Secondary stale/Dead pipeline detected for CUSTOMER ID {Id}. Evicting.", customerId);
                         _registry.TryRemove(customerId, out _);
                     }
                     else
                     {
-                        _log.Debug($"Channel registry HIT for customer ID {customerId} - returning writer immediately");
+                        _log.Debug($"Secondary channel registry HIT for customer ID {customerId} - returning writer immediately");
                         return pipeline; // Pipeline is healthy and running
                     }
-
                 }
 
                 // If the customer was marked suspended while we were waiting for the lock, catch it here
                 if (_suspendedCustomers.ContainsKey(customerId))
                 {
+                    _log.Warn($"While attempting secondary attempt to get or create customer pipeline - customer is suspended | CUST ID: {customerId}");
                     return _suspendedPipeline;
                 }
 
                 using (var scope = _scopeFactory.CreateScope())
                 {
-                    _log.Debug($"Channel registry MISS for customer ID {customerId} - getting customer repository and retrieving customer config.");
+                    _traceLog.Trace($"Primary + secondary channel registry MISS - getting customer repository and retrieving customer config | CUST ID: {customerId}");
                     var repo = scope.ServiceProvider.GetRequiredService<ICustomerRepository>();
                     currentConfig = await repo.GetByIdAsync(customerId, _ct);
                     if (currentConfig == null)
                     {
                         var msg = $"Configuration missing for customer: {customerId}";
-                        _log.Error($"While attempting to get customer config from repository - {msg}");
+                        _log.Error($"While attempting to get customer config from repository - {msg} | CUST ID: {customerId}");
                         throw new InvalidOperationException(msg);
                     }
                 }
+
+                _traceLog.Trace($"Creating customer pipeline from the factory | CUST ID: {customerId}");
 
                 pipeline = _pipelineFactory.CreatePipeline(currentConfig, customerId => MarkAsSuspended(customerId), _ct);
                 if (!_registry.TryAdd(customerId, pipeline))
@@ -115,6 +120,7 @@ namespace Damper.Infrastructure.CustomerChannels
             }
             finally
             {
+                _traceLog.Trace($"Releasing pipeline creation lock | CUST ID: {customerId}");
                 _initLock.Release();
             }
         }
@@ -127,9 +133,10 @@ namespace Damper.Infrastructure.CustomerChannels
         {
             if (_suspendedCustomers.TryAdd(customerId, default))
             {
-                _log.LogCritical("Circuit Breaker Tripped in Registry for Customer {Id}. Suspending channel.", customerId);
+                _log.Error("Circuit Breaker Tripped in Registry for Customer - Suspending channel | CUST ID: {id}", customerId);
 
                 // Evict the pipeline structure completely out of operational memory
+                _traceLog.Trace($"Evicting the customer pipeline from the registry | CUST ID: {customerId}");
                 if (_registry.TryRemove(customerId, out var pipeline))
                 {
                     try
@@ -139,7 +146,7 @@ namespace Damper.Infrastructure.CustomerChannels
                     }
                     catch (Exception ex)
                     {
-                        _log.Error(ex, "Error completing channel writer during pipeline suspension for Customer {Id}", customerId);
+                        _log.Error(ex, "Error completing channel writer during pipeline suspension | CUST ID: {Id}", customerId);
                     }
                 }
                 // SECONDARY CHECK: If a thread was blocked on _initLock, it might have just finished 
@@ -148,18 +155,20 @@ namespace Damper.Infrastructure.CustomerChannels
                 {
                     try
                     {
+                        _traceLog.Trace($"Stale pipeline previously added to registry - removed it here | CUST ID: {customerId}");
                         // Forces the ChannelDispatcher loop to break execution processing naturally
                         stalePipeline.Writer.TryComplete();
                     }
                     catch (Exception ex)
                     {
-                        _log.Error(ex, "Error completing stape pipeline channel writer during pipeline suspension for Customer {Id}", customerId);
+                        _log.Error(ex, "Error completing stale pipeline channel writer during pipeline suspension | CUST ID: {Id}", customerId);
                     }
                 }
 
-                // 1. Kick off the asynchronous self-healing cooldown task
+                // Kick off the asynchronous self-healing cooldown task
                 // We discard the Task return object ('_ =') because this is designed as fire-and-forget.
                 // TODO: Get the cooldown duration from the customer's config (e.g., currentConfig.CircuitBreakerCooldownSeconds).
+                _traceLog.Trace($"Starting cooldown period before attempting to resume the customer | CUST ID: {customerId}");
                 _ = AutoResumeAfterCooldownAsync(customerId, TimeSpan.FromSeconds(10)/*TimeSpan.FromMinutes(5)*/);
             }
         }
@@ -176,17 +185,18 @@ namespace Damper.Infrastructure.CustomerChannels
 
                 if (_suspendedCustomers.ContainsKey(customerId))
                 {
-                    _log.Warn("Circuit breaker cooldown elapsed for Customer {Id}. Attempting automatic self-healing.", customerId);
+                    _log.Warn("Circuit breaker cooldown elapsed for Customer - Attempting automatic self-healing. | CUST ID: {Id}", customerId);
                     ResumeCustomer(customerId);
                 }
             }
             catch (OperationCanceledException)
             {
                 // Host application is shutting down; ignore and let the task exit cleanly
+                _log.Warn($"Application is shutting down during customer cooldown - ignoring | CUST ID: {customerId}");
             }
             catch (Exception ex)
             {
-                _log.Error(ex, "Uncaught error during the circuit breaker recovery delay for Customer {Id}.", customerId);
+                _log.Error(ex, "Uncaught error during the circuit breaker recovery delay | CUST ID: {Id}.", customerId);
             }
         }
 
@@ -201,10 +211,10 @@ namespace Damper.Infrastructure.CustomerChannels
                 // in the dictionary before allowing new ingestion.
                 if (_registry.TryRemove(customerId, out var oldPipeline))
                 {
-                    _log.Info("Purging stale, completed pipeline during resume for {Id}", customerId);
+                    _log.Info("Purging stale, completed pipeline during resume | CUST ID: {Id}", customerId);
                 }
                 
-                _log.Info("Circuit Breaker Reset. Resuming ingestion paths for Customer {Id}.", customerId);
+                _log.Info("Circuit Breaker Reset. Resuming ingestion paths for Customer | CUST ID: {Id}.", customerId);
             }
         }
     
@@ -220,7 +230,7 @@ namespace Damper.Infrastructure.CustomerChannels
             // Attempt to remove the existing pipeline from the registry
             if (_registry.TryRemove(customerId, out var oldPipeline))
             {
-                _log.Info("Resetting pipeline for {Id}. Disposing resources.", customerId);
+                _log.Info("Resetting pipeline for customer - Disposing resources | CUST ID: {Id}", customerId);
 
                 // Safely complete the writer if it isn't already
                 // This signals to any downstream consumers that no more data is coming

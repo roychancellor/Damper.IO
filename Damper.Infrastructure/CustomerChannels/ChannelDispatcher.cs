@@ -13,13 +13,14 @@ namespace Damper.Infrastructure.CustomerChannels
 {
     public class ChannelDispatcher
     {
+        private static readonly ILogger _log = Loggers.Request;
+        private static readonly ILogger _traceLog = Loggers.RequestTrace;
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly Action<string> _onSuspensionTriggered;
         private readonly string _customerId;
         private readonly ChannelReader<WebhookEnvelope> _reader;
         private readonly IServiceScopeFactory _scopeFactory; // The standard lifecycle bridge
         private readonly ObjectPool<WebhookAckContext> _contextPool;
-        private static readonly ILogger _log = Loggers.Request;
         private readonly CancellationToken _ct;
         private CustomerConfig _config;
 
@@ -46,6 +47,8 @@ namespace Damper.Infrastructure.CustomerChannels
         // and only enforce the timer delay if there are more messages waiting to be processed.
         public async Task RunLoopAsync(CancellationToken ct)
         {
+            _traceLog.Trace($"RunLoopAsync starting");
+
             var interval = TimeSpan.FromMilliseconds(_config.DeliveryIntervalMillis);
             using var periodicTimer = new PeriodicTimer(interval);
 
@@ -53,6 +56,7 @@ namespace Damper.Infrastructure.CustomerChannels
             {
                 while (await _reader.WaitToReadAsync(ct))
                 {
+                    _traceLog.Trace($"Entering while loop awaiting messages from the channel sender");
                     var deliveryTasks = new List<Task<bool>>();
                     int messagesInBatch = 0;
     
@@ -66,14 +70,24 @@ namespace Damper.Infrastructure.CustomerChannels
     
                     if (deliveryTasks.Count > 0)
                     {
+                        _traceLog.Trace($"Batch of messages ready to send - awaiting all delivery tasks for the batch");
+
                         // Execute the outbound HTTP burst concurrently
                         var results = await Task.WhenAll(deliveryTasks);
+                        
+                        _traceLog.Trace($"Delivery tasks completed for the batch");
+
+                        var completedWithErrors = results.Any(success => !success);
+                        if (completedWithErrors)
+                        {
+                            _traceLog.Trace($"Delivery tasks completed with error(s) | ERROR COUNT: {results.Count(r => r == false)}");
+                        }
     
                         // If any single message in this batch completely failed after exhausting internal retries,
                         // trip the circuit breaker immediately.
-                        if (results.Any(success => !success))
+                        if (completedWithErrors)
                         {
-                            _log.LogCritical("Circuit breaker triggered for Customer {Id} due to exhausted retries.", _customerId);
+                            _log.Error("Circuit breaker triggered for Customer {Id} due to exhausted retry count.", _customerId);
                             _onSuspensionTriggered(_customerId);
                             
                             // Break out of the loop. The registry completion code will tear down this pipeline.
@@ -84,6 +98,7 @@ namespace Damper.Infrastructure.CustomerChannels
                         // This prevents adding artificial latency to lone, sporadic trickle messages.
                         if (_reader.CanCount && _reader.Count > 0)
                         {
+                            _traceLog.Trace($"There are new messages but waiting for the configured delivery time for a predictable recovery window.");
                             // Guarantees a true, predictable recovery window between outbound bursts
                             await Task.Delay(TimeSpan.FromMilliseconds(_config.DeliveryIntervalMillis), ct);
                         }
@@ -117,6 +132,8 @@ namespace Damper.Infrastructure.CustomerChannels
         {
             try
             {
+                _traceLog.Trace($"Refreshing customer configuration | CUST ID: {_customerId}");
+
                 using var scope = _scopeFactory.CreateScope();
                 var repo = scope.ServiceProvider.GetRequiredService<ICustomerRepository>();
                 var freshConfig = await repo.GetByIdAsync(_customerId, ct);
@@ -137,6 +154,12 @@ namespace Damper.Infrastructure.CustomerChannels
         {
             try
             {
+                // Allow NLog to automatically populate the Correlation Id in every log statement in this method
+                using var correlationScope = _log.BeginCorrelationScope(envelope.CorrelationId);
+
+                _traceLog.Debug($"DeliverWebhookWithRetryAsync starting | CUST ID: {envelope.CustomerId} | DEST: {envelope.DestinationUrl}");
+                
+                // TODO: Get these from appsettings
                 int maxAttempts = 5;
                 TimeSpan retryBackoff = TimeSpan.FromSeconds(2);
 
@@ -146,6 +169,7 @@ namespace Damper.Infrastructure.CustomerChannels
                     using var request = new HttpRequestMessage(HttpMethod.Post, config.DestinationURL);
                     request.Content = new ReadOnlyMemoryContent(envelope.RawPayloadBytes);
 
+                    _traceLog.Debug("Getting all HTTP headers ready for request");
                     foreach (var header in envelope.Headers)
                     {
                         if (IsSystemHeader(header.Key)) { continue; }
@@ -164,18 +188,20 @@ namespace Damper.Infrastructure.CustomerChannels
                         }
                         request.Content.Headers.ContentType = mediaHeader;
                     }
-
                     request.Headers.Add("X-Damper-Correlation-Id", envelope.CorrelationId);
                     request.Headers.Add("X-Damper-Delivery-Attempt", envelope.AttemptCount.ToString());
 
                     try
                     {
+                        _traceLog.Debug($"Sending request | CUST ID: {envelope.CustomerId} | URL: {envelope.DestinationUrl}");
                         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                         cts.CancelAfter(TimeSpan.FromSeconds(10));
                         using var response = await client.SendAsync(request, cts.Token);
 
+                        _traceLog.Debug($"Response received | CUST ID: {envelope.CustomerId} | HTTP STATUS: {response.StatusCode}");
                         if (response.IsSuccessStatusCode)
                         {
+                            _log.Info($"Response IS successful | CUST ID: {envelope.CustomerId} | HTTP STATUS: {response.StatusCode}");
                             DamperMetrics.DeliverySuccessCounter.Add(1, new KeyValuePair<string, object?>("customer_id", envelope.CustomerId));
                             await FinalizeAckAsync(envelope);
                             return true;
@@ -183,23 +209,24 @@ namespace Damper.Infrastructure.CustomerChannels
                         
                         if (Is4XX(response.StatusCode) && !IsTooManyRequests(response.StatusCode))
                         {
-                            _log.Fatal($"Customer returned 4XX status code - sending to dead letter | CUST ID: {envelope.CustomerId} | HTTP STATUS: {response.StatusCode}");
+                            _log.Fatal($"Customer returned 4XX status code - Sending to dead letter | CUST ID: {envelope.CustomerId} | HTTP STATUS: {response.StatusCode}");
                             await FinalizeRejectAsync(envelope);
                             return true; // Return true to keep the pipeline loop alive
                         }
                         
+                        _log.Warn($"Response NOT successful (try {envelope.AttemptCount}) - Executing retry with exponential backoff | CUST ID: {envelope.CustomerId} | HTTP STATUS: {response.StatusCode}");
                         envelope.AttemptCount++;
                         retryBackoff = await DoExponentialBackoff(retryBackoff, ct);
                     }
                     catch (Exception ex)
                     {
-                        _log.Warn("Transient error delivering webhook for {Id}. Attempt {Attempt}", envelope.CustomerId, envelope.AttemptCount, ex);
+                        _log.Error("Transient error delivering webhook for {Id}. Attempt {Attempt} - Executing retry with exponential backoff ", envelope.CustomerId, envelope.AttemptCount, ex);
                         envelope.AttemptCount++;
                         retryBackoff = await DoExponentialBackoff(retryBackoff, ct);
                     }
                 }
 
-                _log.Error("Exhausted retries for {Id}. Sending to dead letter.", envelope.CustomerId);
+                _log.Error("Exhausted retries for {Id} - Sending to dead letter.", envelope.CustomerId);
                 await FinalizeRejectAsync(envelope);
                 return true; // Return true to keep the pipeline loop alive
             }
@@ -210,6 +237,7 @@ namespace Damper.Infrastructure.CustomerChannels
                     _contextPool.Return(envelope.AckContext);
                     envelope.AckContext = null;
                 }
+                _traceLog.Trace($"DeliverWebhookWithRetryAsync finished | CUST ID: {_customerId}");
             }
         }
 

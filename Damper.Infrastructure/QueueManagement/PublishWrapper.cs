@@ -82,7 +82,7 @@ namespace Damper.Infrastructure.QueueManagement
 
         public override string ToString()
         {
-            return $"{nameof(CorrelationId)}: {CorrelationId} | {nameof(CustomerId)}: {CustomerId} | {nameof(Payload)}: {Payload} | {nameof(ShouldThrow)}: {ShouldThrow}";
+            return $"{nameof(CorrelationId)}: {CorrelationId} | {nameof(CustomerId)}: {CustomerId} | {nameof(Payload)}: REDACTED | {nameof(ShouldThrow)}: {ShouldThrow}";
         }
     }
 }
