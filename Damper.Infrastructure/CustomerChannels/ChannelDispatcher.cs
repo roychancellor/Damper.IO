@@ -228,7 +228,7 @@ namespace Damper.Infrastructure.CustomerChannels
 
                 _log.Error("Exhausted retries for {Id} - Sending to dead letter.", envelope.CustomerId);
                 await FinalizeRejectAsync(envelope);
-                return true; // Return true to keep the pipeline loop alive
+                return false; // This might kill the pipeline loop!!!
             }
             finally
             {

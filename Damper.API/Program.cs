@@ -14,6 +14,7 @@ using Microsoft.Extensions.ObjectPool;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Instrumentation.Runtime;
+using RabbitMQ.Client;
 
 var bootstrapLogger = LogManager.Setup().GetCurrentClassLogger();
 
@@ -44,8 +45,7 @@ try
         int shardIndex = i;
         // Using the explicit generic registration ensures Microsoft.Extensions.Hosting 
         // correctly identifies and tracks each individual IHostedService instance.
-        builder.Services.AddTransient<IHostedService>(sp => new ShardBackgroundWorker(shardIndex, sp.GetRequiredService<IShardMessageProcessor>()));
-        //builder.Services.AddHostedService(sp => new ShardBackgroundWorker(shardIndex, sp.GetRequiredService<IShardMessageProcessor>()));
+        builder.Services.AddTransient<IHostedService>(sp => new ShardBackgroundWorker(sp.GetRequiredService<IConnection>(), shardIndex, sp.GetRequiredService<IShardMessageProcessor>()));
     }
     builder.Services.AddHttpClient("DamperEgress")
                     .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler

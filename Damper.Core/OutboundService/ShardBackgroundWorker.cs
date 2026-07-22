@@ -16,11 +16,12 @@ namespace Damper.Core.OutboundService
        
         private readonly int _shardIndex;
         private readonly IShardMessageProcessor _messageProcessor;
-        private IConnection? _connection;
+        private IConnection _connection;
         private IChannel? _channel;
 
-        public ShardBackgroundWorker(int shardIndex, IShardMessageProcessor messageProcessor)
+        public ShardBackgroundWorker(IConnection connection, int shardIndex, IShardMessageProcessor messageProcessor)
         {
+            _connection = connection;
             _shardIndex = shardIndex;
             _messageProcessor = messageProcessor;
         }
@@ -33,8 +34,6 @@ namespace Damper.Core.OutboundService
             await Task.Yield();
             
             _appLog.Info($"Configuring shard background worker | SHARD INDEX: {_shardIndex}");
-            var factory = new ConnectionFactory { HostName = "localhost" };
-            _connection = await factory.CreateConnectionAsync(stoppingToken);
             _channel = await _connection.CreateChannelAsync(cancellationToken: stoppingToken);
 
             //TODO: Put the Rabbit MQ exchange and queue names into appsettings
@@ -100,44 +99,11 @@ namespace Damper.Core.OutboundService
                 }
             }
             public async Task NackAsync(ulong deliveryTag, bool multiple, bool requeue) => await _channel.BasicNackAsync(deliveryTag, multiple, requeue);
-
-            public async Task MoveToDeadLetterAsync(WebhookEnvelope envelope)
-            {
-                // TODO: create a Constants class or put these in appsettings
-                const string dlxExchange = "damper.dlx";
-                const string dlqRoutingKey = "dead-letter";
-
-                // Create message properties
-                // Important: Re-use the original message properties (headers, persistence, etc.)
-                var props = new BasicProperties
-                {
-                    Persistent = true,
-                    Headers = new Dictionary<string, object?>
-                    {
-                        { "x-original-reason", "parking-limit-exceeded" },
-                        { "x-failed-at", DateTime.UtcNow.ToString("O") },
-                        { "x-customer-id", envelope.CustomerId }
-                    }
-                };
-
-                // Publish to the Dead Letter Exchange
-                // Send the original payload bytes to ensure the DLQ message is an exact replica
-                await _channel.BasicPublishAsync(
-                    exchange: dlxExchange,
-                    routingKey: dlqRoutingKey,
-                    mandatory: true,
-                    basicProperties: props,
-                    body: envelope.RawPayloadBytes // Ensure there is access to the original bytes
-                );
-                
-                _reqLog.Info("Message for customer successfully moved to DLQ. | CUST ID: {Id}", envelope.CustomerId);
-            }
         }
 
         public override async Task StopAsync(CancellationToken cancellationToken)
         {
             if (_channel is not null) { await _channel.CloseAsync(cancellationToken); }
-            if (_connection is not null) { await _connection.CloseAsync(cancellationToken); }
             await base.StopAsync(cancellationToken);
         }
     }

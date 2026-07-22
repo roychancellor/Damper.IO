@@ -115,11 +115,10 @@ namespace Damper.Core.OutboundService
                     if (StayLimitExceeded(parkedAt, maxParkingDuration))
                     {
                         _log.Warn("Parking lot stay limit exceeded for customer - Moving to DLQ. | CUST ID: {Id}", envelope.CustomerId);
-                        await context.MoveToDeadLetterAsync(envelope);
+                        await context.RejectAsync(ea.DeliveryTag, requeue: false);
                         DamperMetrics.DeadLetterCounter.Add(1, 
                             new KeyValuePair<string, object?>("customer_id", envelope.CustomerId),
                             new KeyValuePair<string, object?>("reason", "parking-limit-exceeded"));
-                        await context.AckAsync(ea.DeliveryTag);
                         _contextPool.Return(ackContext);
                         return;
                     }

@@ -7,7 +7,7 @@ namespace Damper.Infrastructure.Extensions
     {
         public static IServiceCollection AddQueuePublishing(this IServiceCollection services)
         {
-            services.AddScoped<IQueuePublisher, RabbitMQQueuePublisher>();
+            services.AddSingleton<IQueuePublisher, RabbitMQQueuePublisher>();
             
             return services;
         }

@@ -47,15 +47,6 @@ public class WebhookIngestionService : IWebhookIngestionService
             return LogAndGenerateFailureResult(rw.SetError($"Customer configuration is missing or corrupted", ErrorType.ServerError));
         }
 
-        // TODO: Decide whether to keep this or delete it. Customers would need to specify
-        // the name of the webhook signature header. Checking its presence could offer a
-        // small amount of extra security by bouncing very obviously invalid requests.
-        string? incomingSignature = rw.HttpHeaders[customerConfig.WebhookHeaderKey];
-        if (string.IsNullOrEmpty(incomingSignature))
-        {
-            return LogAndGenerateFailureResult(rw.SetError("The incoming webhook header key cannot be null or empty", ErrorType.BadRequest));
-        }
-
         // Verify the Content-Type header is parsable as a known type, as the dispatcher needs it to be correct
         // to send a valid request to the customer. Checking here allows for HTTP 400 if it is not parsable.
         var contentTypeExists = rw.HttpHeaders.TryGetValue("Content-Type", out StringValues contentTypeReceived);

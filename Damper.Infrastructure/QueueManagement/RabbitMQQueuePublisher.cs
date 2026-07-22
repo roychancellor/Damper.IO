@@ -3,6 +3,7 @@ using Damper.Infrastructure.ReferenceData;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using RabbitMQ.Client;
+using RabbitMQ.Client.Events;
 using System.Text;
 
 namespace Damper.Infrastructure.QueueManagement
@@ -57,6 +58,7 @@ namespace Damper.Infrastructure.QueueManagement
 
                     _traceLog.Trace($"Creating queue channel");
                     _channel = await _connection.CreateChannelAsync(channelOptions, pw.CancelToken);
+                    _channel.BasicReturnAsync += OnBasicReturnAsync;
                 }
                 
                 _traceLog.Trace($"Converting webhook envelope payload to bytes");
@@ -115,6 +117,28 @@ namespace Damper.Infrastructure.QueueManagement
                 _traceLog.Trace($"Releasing channel semaphore");
                 _channelSemaphore.Release();
             }
+        }
+
+        private Task OnBasicReturnAsync(object sender, BasicReturnEventArgs ea)
+        {
+            // Extract routing details
+            var routingKey = ea.RoutingKey;
+            var exchange = ea.Exchange;
+            var replyCode = ea.ReplyCode; // e.g. 312 (NO_ROUTE)
+            var replyText = ea.ReplyText;
+
+            // Log the unroutable message error at the FATAL level so it is LOUD!!!
+            _log.Fatal(
+                "RabbitMQ message returned (unroutable) | CORR ID: {Corr} | CUST ID: {Key} | XCHG: {Exchange} | Code: {Code} | Text: {Text}",
+                ea.BasicProperties.MessageId,
+                routingKey,
+                exchange,
+                replyCode,
+                replyText
+            );
+
+            // Yield back to complete the Task expected by AsyncEventHandler
+            return Task.CompletedTask;
         }
 
         public void Dispose()
