@@ -7,5 +7,6 @@ namespace Damper.Infrastructure.Models
         Task AckAsync(ulong deliveryTag);
         Task RejectAsync(ulong deliveryTag, bool requeue);
         Task NackAsync(ulong deliveryTag, bool multiple, bool requeue);
+        Task ParkForRetryAsync(WebhookEnvelope envelope, ulong deliveryTag);
     }
 }

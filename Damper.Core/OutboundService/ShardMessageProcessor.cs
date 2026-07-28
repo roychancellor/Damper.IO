@@ -93,41 +93,8 @@ namespace Damper.Core.OutboundService
                 _traceLog.Trace($"Getting customer channel | CUST ID: {envelope.CustomerId} | DEL TAG: {ea.DeliveryTag}");
                 var pipeline = await _channelRegistry.GetOrCreatePipelineAsync(envelope.CustomerId);
                 
-                // SELF-HEALING: If infrastructure is dead, reset registry and NACK for retry
-                if (pipeline.BackgroundTask.IsCompleted)
-                {
-                    _log.Warn("Retrieved pipeline for customer is dead - Resetting registry and NACKing for retry. | CUST ID: {Id}", envelope.CustomerId);
-                    _channelRegistry.ResetPipeline(envelope.CustomerId);
-                    await context.NackAsync(ea.DeliveryTag, multiple: false, requeue: true);
-                    _contextPool.Return(ackContext);
-                    return;
-                }
-
                 _traceLog.Trace($"Attempting non-blocking write to customer channel | CUST ID: {envelope.CustomerId} | DEL TAG: {ea.DeliveryTag}");
-                
-                // TODO: Get parking lot stay duration from appsettings
-                var parkedAt = DateTime.UtcNow;
-                var maxParkingDuration = TimeSpan.FromMinutes(5);
 
-                while (_channelRegistry.IsSuspended(envelope.CustomerId))
-                {
-                    _traceLog.Trace($"Customer is suspended and waiting in parking lot | CUST ID: {envelope.CustomerId}");
-                    if (StayLimitExceeded(parkedAt, maxParkingDuration))
-                    {
-                        _log.Warn("Parking lot stay limit exceeded for customer - Moving to DLQ. | CUST ID: {Id}", envelope.CustomerId);
-                        await context.RejectAsync(ea.DeliveryTag, requeue: false);
-                        DamperMetrics.DeadLetterCounter.Add(1, 
-                            new KeyValuePair<string, object?>("customer_id", envelope.CustomerId),
-                            new KeyValuePair<string, object?>("reason", "parking-limit-exceeded"));
-                        _contextPool.Return(ackContext);
-                        return;
-                    }
-                    // TODO: Get parking lot while loop delay from appsettings
-                    await Task.Delay(TimeSpan.FromSeconds(30), context.StoppingToken);
-                }
-
-                _traceLog.Trace($"Attempting to write message to channel | CUST ID: {envelope.CustomerId}");
-                
                 // TODO: Get the wait to write token expiration time from appsettings
                 var canWrite = await pipeline.Writer.WaitToWriteAsync(new CancellationTokenSource(1000).Token);
                 if (canWrite && !pipeline.BackgroundTask.IsCompleted && pipeline.Writer.TryWrite(envelope))
@@ -138,17 +105,21 @@ namespace Damper.Core.OutboundService
                 }
                 else
                 {
-                    if (pipeline.BackgroundTask.IsCompleted)
+                    // Covers every reason we couldn't hand off: suspended (sentinel writer),
+                    // buffer full, or a genuinely dead/crashed pipeline - all get parked for
+                    // delayed automatic retry instead of an immediate, unthrottled NACK.
+                    if (pipeline.BackgroundTask.IsCompleted && !_channelRegistry.IsSuspended(envelope.CustomerId))
                     {
-                        _log.Warn("Pipeline crashed during wait for customer - Resetting registry and NACKing. | CUST ID: {Id}", envelope.CustomerId);
+                        _log.Warn("Pipeline crashed for customer - Resetting registry. | CUST ID: {Id}", envelope.CustomerId);
                         _channelRegistry.ResetPipeline(envelope.CustomerId);
-                        await context.NackAsync(ea.DeliveryTag, multiple: false, requeue: true);
                     }
                     else
                     {
-                        _log.Warn("Customer buffer is full or suspended - NACKing message to free up Shard | CUST ID: {Id} | SHARD: {Idx}.", envelope.CustomerId, context.ShardIndex);
-                        await context.NackAsync(ea.DeliveryTag, multiple: false, requeue: true);
+                        _log.Warn("Customer buffer full or suspended - Parking message for delayed retry | CUST ID: {Id} | SHARD: {Idx}.", envelope.CustomerId, context.ShardIndex);
                     }
+
+                    DamperMetrics.ParkedForRetryCounter.Add(1);
+                    await context.ParkForRetryAsync(envelope, ea.DeliveryTag);
                     _contextPool.Return(ackContext);
                 }
             }
@@ -175,11 +146,6 @@ namespace Damper.Core.OutboundService
                 _log.Error(ex, "Fatal error on shard parsing layer - NACKing message. | SHARD: {Idx}", context.ShardIndex);
                 await context.NackAsync(ea.DeliveryTag, multiple: false, requeue: true);
             }
-        }
-
-        private static bool StayLimitExceeded(DateTime parkedAt, TimeSpan maxParkingDuration)
-        {
-            return DateTime.UtcNow - parkedAt > maxParkingDuration;
         }
     }
 }

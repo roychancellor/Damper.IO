@@ -99,6 +99,48 @@ namespace Damper.Core.OutboundService
                 }
             }
             public async Task NackAsync(ulong deliveryTag, bool multiple, bool requeue) => await _channel.BasicNackAsync(deliveryTag, multiple, requeue);
+
+            public async Task ParkForRetryAsync(WebhookEnvelope envelope, ulong deliveryTag)
+            {
+                // TODO: Convert constants to use IOptionsMonitor pattern and get from app settings
+                const string parkingExchange = "damper.parking.exchange";
+                const int baseTtlMs = 60_000;
+                const int jitterMs = 10_000;
+
+                var ttlMs = baseTtlMs + Random.Shared.Next(0, jitterMs);
+
+                var headers = new Dictionary<string, object?>
+                {
+                    { "x-damper-customer-id", envelope.CustomerId },
+                    { "x-damper-destination-url", envelope.DestinationUrl },
+                    { "x-damper-correlation-id", envelope.CorrelationId },
+                    { "x-damper-attempt-count", 1 } // We want this to come back fresh and ready to retry sending
+                };
+                foreach (var (key, value) in envelope.Headers)
+                {
+                    headers[$"h_{key}"] = value;
+                }
+
+                var props = new BasicProperties
+                {
+                    Persistent = true,
+                    Expiration = ttlMs.ToString(),
+                    Headers = headers
+                };
+
+                // Routing key MUST be the customer ID, not the queue name — see comment
+                // on the parking queue's dead-letter config for why this matters.
+                await _channel.BasicPublishAsync(
+                    exchange: parkingExchange,
+                    routingKey: envelope.CustomerId,
+                    mandatory: false, // fanout with one queue - nothing to fail to route to
+                    basicProperties: props,
+                    body: envelope.RawPayloadBytes);
+
+                await _channel.BasicAckAsync(deliveryTag, multiple: false);
+
+                _reqLog.Info("Parked message for delayed retry | CUST ID: {Id} | TTL_MS: {Ttl}", envelope.CustomerId, ttlMs);
+            }
         }
 
         public override async Task StopAsync(CancellationToken cancellationToken)

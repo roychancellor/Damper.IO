@@ -88,9 +88,17 @@ namespace Damper.Infrastructure.CustomerChannels
                         if (completedWithErrors)
                         {
                             _log.Error("Circuit breaker triggered for Customer {Id} due to exhausted retry count.", _customerId);
+
+                            // Drain anything still buffered but unread - it was pulled off RabbitMQ and is unacked,
+                            // but no delivery task will ever pick it up once this loop exits. Park it for automatic
+                            // retry after cooldown instead of leaving it stranded until the app restarts.
+                            while (_reader.TryRead(out var leftover))
+                            {
+                                await FinalizeParkAsync(leftover);
+                            }
+
                             _onSuspensionTriggered(_customerId);
                             
-                            // Break out of the loop. The registry completion code will tear down this pipeline.
                             return;
                         }
     
@@ -226,9 +234,9 @@ namespace Damper.Infrastructure.CustomerChannels
                     }
                 }
 
-                _log.Error("Exhausted retries for {Id} - Sending to dead letter.", envelope.CustomerId);
-                await FinalizeRejectAsync(envelope);
-                return false; // This might kill the pipeline loop!!!
+                _log.Error("Exhausted retries for {Id} - Parking for delayed automatic retry.", envelope.CustomerId);
+                await FinalizeParkAsync(envelope); // Send to the parking lot for a time out/retry (the other special paths above will send to DLQ if necessary)
+                return false;
             }
             finally
             {
@@ -256,6 +264,16 @@ namespace Damper.Infrastructure.CustomerChannels
             if (envelope.AckContext != null)
             {
                 await envelope.AckContext.RejectAsync(requeue: false);
+                _contextPool.Return(envelope.AckContext);
+                envelope.AckContext = null;
+            }
+        }
+
+        private async Task FinalizeParkAsync(WebhookEnvelope envelope)
+        {
+            if (envelope.AckContext != null)
+            {
+                await envelope.AckContext.ParkForRetryAsync(envelope);
                 _contextPool.Return(envelope.AckContext);
                 envelope.AckContext = null;
             }

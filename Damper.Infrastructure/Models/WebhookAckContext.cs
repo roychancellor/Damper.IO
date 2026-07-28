@@ -36,6 +36,10 @@ namespace Damper.Infrastructure.Models
                 throw; // DO NOT SWALLOW THIS EXCEPTION
             }
         }
+
+        public async Task ParkForRetryAsync(WebhookEnvelope envelope) => await ExecuteSafeAsync(() =>
+            ShardContext!.ParkForRetryAsync(envelope, DeliveryTag));
+
         public void Reset()
         {
             DeliveryTag = 0;

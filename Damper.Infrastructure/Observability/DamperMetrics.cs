@@ -6,7 +6,7 @@ namespace Damper.Infrastructure.Observability
     {
         private static readonly Meter Meter = new("Damper.Core", "1.0.0");
 
-        public static readonly Counter<long> DeadLetterCounter = 
+        public static readonly Counter<long> ParkedForRetryCounter = 
             Meter.CreateCounter<long>("damper.messages.dead_lettered", "messages", "Count of messages moved to DLQ");
 
         public static readonly Counter<long> DeliverySuccessCounter = 
