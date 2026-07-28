@@ -1,14 +1,17 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Threading.Channels;
-using System.Threading.Tasks;
+using Damper.Infrastructure.CustomerChannels;
 using Damper.Infrastructure.Models;
 
 namespace Damper.Infrastructure.ChannelRegistry
 {
     public interface IChannelRegistry
     {
-        Task<ChannelWriter<WebhookEnvelope>> GetOrCreateChannel(string customerId);
+        Task<CustomerEgressPipeline> GetOrCreatePipelineAsync(string customerId);
+        void MarkAsSuspended(string customerId);
+        Task AutoResumeAfterCooldownAsync(string customerId, TimeSpan cooldown);
+        void ResumeCustomer(string customerId);
+        bool IsSuspended(string customerId);
+        void EvictPipeline(string customerId);
+        void ResetPipeline(string customerId);
     }
 }

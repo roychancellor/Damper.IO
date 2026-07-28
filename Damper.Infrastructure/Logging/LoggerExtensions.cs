@@ -21,6 +21,12 @@ public static class LoggerExtensions
     public static void Error(this ILogger logger, Exception ex, string message, params object?[] args) 
         => logger.LogError(ex, message, args);
 
+    public static void Fatal(this ILogger logger, string message, params object?[] args) 
+        => logger.LogCritical(message, args);
+    
     public static void Fatal(this ILogger logger, Exception ex, string message, params object?[] args) 
         => logger.LogCritical(ex, message, args);
+
+    public static IDisposable? BeginCorrelationScope(this ILogger logger, string correlationId)
+        => logger.BeginScope(new Dictionary<string, object> { ["CorrelationId"] = correlationId });
 }

@@ -4,20 +4,24 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
+using RabbitMQ.Client.Exceptions;
 
 namespace Damper.Core.OutboundService
 {
     public class ShardBackgroundWorker : BackgroundService
     {
         private static readonly ILogger _appLog = Loggers.Application;
-        
+        private static readonly ILogger _reqLog = Loggers.Request;
+        private static readonly ILogger _traceLog = Loggers.RequestTrace;
+       
         private readonly int _shardIndex;
         private readonly IShardMessageProcessor _messageProcessor;
-        private IConnection? _connection;
+        private IConnection _connection;
         private IChannel? _channel;
 
-        public ShardBackgroundWorker(int shardIndex, IShardMessageProcessor messageProcessor)
+        public ShardBackgroundWorker(IConnection connection, int shardIndex, IShardMessageProcessor messageProcessor)
         {
+            _connection = connection;
             _shardIndex = shardIndex;
             _messageProcessor = messageProcessor;
         }
@@ -30,21 +34,37 @@ namespace Damper.Core.OutboundService
             await Task.Yield();
             
             _appLog.Info($"Configuring shard background worker | SHARD INDEX: {_shardIndex}");
-            var factory = new ConnectionFactory { HostName = "localhost" };
-            _connection = await factory.CreateConnectionAsync(stoppingToken);
             _channel = await _connection.CreateChannelAsync(cancellationToken: stoppingToken);
 
+            //TODO: Put the Rabbit MQ exchange and queue names into appsettings
             var queueName = $"damper.webhook.queue.shard_{_shardIndex:D2}";
+            var dlxName = "damper.dlx";
+            var dlqName = "damper.webhook.queue.dead_letter";
+
+            try
+            {
+                // Verify the infrastructure exists (Fail-fast if missing)
+                await _channel.ExchangeDeclarePassiveAsync(dlxName, cancellationToken: stoppingToken);
+                await _channel.QueueDeclarePassiveAsync(dlqName, cancellationToken: stoppingToken);
+                await _channel.QueueDeclarePassiveAsync(queueName, cancellationToken: stoppingToken);
+            }
+            catch (OperationInterruptedException ex)
+            {
+                _appLog.Error(ex, "Required RabbitMQ infrastructure is missing for shard {Index:D2}. Pre-provision queues and exchanges.", _shardIndex);
+                throw; // Stop the service if dependencies are missing
+            }
+
+            // TODO: Put the prefetch count in appsettings
             await _channel.BasicQosAsync(0, 30, false, stoppingToken);
 
             // Build the bridge context inside the runtime loop execution thread
-            var processingContext = new RuntimeProcessingContext(_shardIndex, _channel);
+            var processingContext = new RuntimeProcessingContext(_shardIndex, _channel, stoppingToken);
 
             var consumer = new AsyncEventingBasicConsumer(_channel);
             consumer.ReceivedAsync += (sender, ea) => _messageProcessor.ProcessMessageAsync(ea, processingContext);
 
             await _channel.BasicConsumeAsync(queueName, autoAck: false, consumer, stoppingToken);
-            _appLog.Info("Shard consumer thread {Index:D2} bound to {QueueName}", _shardIndex, queueName);
+            _appLog.Info("Shard consumer thread bound to queue | SHARD {Index:D2} --> QUEUE {QueueName}", _shardIndex, queueName);
             
             await Task.Delay(Timeout.Infinite, stoppingToken);
         }
@@ -54,22 +74,78 @@ namespace Damper.Core.OutboundService
         {
             private readonly IChannel _channel;
             public int ShardIndex { get; }
+            private CancellationToken _stoppingToken;
+            public CancellationToken StoppingToken => _stoppingToken;
 
-            public RuntimeProcessingContext(int shardIndex, IChannel channel)
+            public RuntimeProcessingContext(int shardIndex, IChannel channel, CancellationToken stoppingToken)
             {
                 ShardIndex = shardIndex;
                 _channel = channel;
+                _stoppingToken = stoppingToken;
             }
 
             public async Task AckAsync(ulong deliveryTag) => await _channel.BasicAckAsync(deliveryTag, multiple: false);
-            public async Task RejectAsync(ulong deliveryTag, bool requeue) => await _channel.BasicRejectAsync(deliveryTag, requeue);
+            public async Task RejectAsync(ulong deliveryTag, bool requeue) 
+            {
+                if (_channel.IsOpen)
+                {
+                    _traceLog.Trace($"Rejecting message! | DEL TAG: {deliveryTag} | REQUEUE: {requeue}");
+                    await _channel.BasicRejectAsync(deliveryTag, requeue);
+                }
+                else
+                {
+                    _reqLog.Error($"CANNOT NACK: CHANNEL IS CLOSED!!!");
+                    throw new InvalidOperationException("Cannot Nack: Channel is closed.");
+                }
+            }
             public async Task NackAsync(ulong deliveryTag, bool multiple, bool requeue) => await _channel.BasicNackAsync(deliveryTag, multiple, requeue);
+
+            public async Task ParkForRetryAsync(WebhookEnvelope envelope, ulong deliveryTag)
+            {
+                // TODO: Convert constants to use IOptionsMonitor pattern and get from app settings
+                const string parkingExchange = "damper.parking.exchange";
+                const int baseTtlMs = 60_000;
+                const int jitterMs = 10_000;
+
+                var ttlMs = baseTtlMs + Random.Shared.Next(0, jitterMs);
+
+                var headers = new Dictionary<string, object?>
+                {
+                    { "x-damper-customer-id", envelope.CustomerId },
+                    { "x-damper-destination-url", envelope.DestinationUrl },
+                    { "x-damper-correlation-id", envelope.CorrelationId },
+                    { "x-damper-attempt-count", 1 } // We want this to come back fresh and ready to retry sending
+                };
+                foreach (var (key, value) in envelope.Headers)
+                {
+                    headers[$"h_{key}"] = value;
+                }
+
+                var props = new BasicProperties
+                {
+                    Persistent = true,
+                    Expiration = ttlMs.ToString(),
+                    Headers = headers
+                };
+
+                // Routing key MUST be the customer ID, not the queue name — see comment
+                // on the parking queue's dead-letter config for why this matters.
+                await _channel.BasicPublishAsync(
+                    exchange: parkingExchange,
+                    routingKey: envelope.CustomerId,
+                    mandatory: false, // fanout with one queue - nothing to fail to route to
+                    basicProperties: props,
+                    body: envelope.RawPayloadBytes);
+
+                await _channel.BasicAckAsync(deliveryTag, multiple: false);
+
+                _reqLog.Info("Parked message for delayed retry | CUST ID: {Id} | TTL_MS: {Ttl}", envelope.CustomerId, ttlMs);
+            }
         }
 
         public override async Task StopAsync(CancellationToken cancellationToken)
         {
-            if (_channel is not null) await _channel.CloseAsync(cancellationToken);
-            if (_connection is not null) await _connection.CloseAsync(cancellationToken);
+            if (_channel is not null) { await _channel.CloseAsync(cancellationToken); }
             await base.StopAsync(cancellationToken);
         }
     }

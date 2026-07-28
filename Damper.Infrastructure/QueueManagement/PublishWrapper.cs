@@ -1,8 +1,5 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Text;
-using System.Threading.Tasks;
+using Damper.Infrastructure.Models;
 
 namespace Damper.Infrastructure.QueueManagement
 {
@@ -10,11 +7,11 @@ namespace Damper.Infrastructure.QueueManagement
     {
         public string CorrelationId { get; set; } = string.Empty;
         public string CustomerId { get; set; } = string.Empty;
-        public string Payload { get; set; } = string.Empty;
+        public WebhookEnvelope Payload { get; set; } = new();
         public CancellationToken CancelToken { get; set; }
         public bool ShouldThrow { get; set; }
 
-        public static PublishWrapper BuildFrom(string correlationId, string customerId, string payload, CancellationToken ct, bool shouldThrow = false)
+        public static PublishWrapper BuildFrom(string correlationId, string customerId, WebhookEnvelope payload, CancellationToken ct, bool shouldThrow = false)
         {
             return new PublishWrapper
             {
@@ -47,7 +44,7 @@ namespace Damper.Infrastructure.QueueManagement
             return this;
         }
 
-        public PublishWrapper SetPayload(string toSet)
+        public PublishWrapper SetPayload(WebhookEnvelope toSet)
         {
             Payload = toSet;
             return this;
@@ -66,7 +63,7 @@ namespace Damper.Infrastructure.QueueManagement
             {
                 sb.Append($"{GetSeparator(sb)}Customer ID can not be null or empty");
             }
-            else if (string.IsNullOrWhiteSpace(Payload))
+            else if (Payload == null || Payload.RawPayloadBytes.IsEmpty)
             {
                 sb.Append($"{GetSeparator(sb)}Payload can not be null or empty");
             }
@@ -85,7 +82,7 @@ namespace Damper.Infrastructure.QueueManagement
 
         public override string ToString()
         {
-            return $"{nameof(CorrelationId)}: {CorrelationId} | {nameof(CustomerId)}: {CustomerId} | {nameof(Payload)}: {Payload} | {nameof(ShouldThrow)}: {ShouldThrow}";
+            return $"{nameof(CorrelationId)}: {CorrelationId} | {nameof(CustomerId)}: {CustomerId} | {nameof(Payload)}: REDACTED | {nameof(ShouldThrow)}: {ShouldThrow}";
         }
     }
 }

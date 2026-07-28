@@ -23,7 +23,9 @@ namespace Damper.Infrastructure.Extensions
                     Port = rabbitRefData.Port,
                     UserName = rabbitRefData.UserName,
                     Password = rabbitRefData.Password, // Automatically bound from environment variable
-                    VirtualHost = rabbitRefData.VirtualHost ?? "/"
+                    VirtualHost = rabbitRefData.VirtualHost ?? "/",
+                    AutomaticRecoveryEnabled = true,
+                    TopologyRecoveryEnabled = true,
                 };
 
                 // Because this lambda is synchronous, block once during 
