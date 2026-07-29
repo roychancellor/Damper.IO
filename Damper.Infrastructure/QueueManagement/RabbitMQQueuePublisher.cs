@@ -16,9 +16,9 @@ namespace Damper.Infrastructure.QueueManagement
         private IChannel? _channel;
         private readonly SemaphoreSlim _channelSemaphore = new(1, 1);
         private bool _disposed;
-        private IOptionsMonitor<AppRefData> _appOptMon;
+        private IOptionsMonitor<AppSettings> _appOptMon;
 
-        public RabbitMQQueuePublisher(IConnection connection, IOptionsMonitor<AppRefData> appOptMon)
+        public RabbitMQQueuePublisher(IConnection connection, IOptionsMonitor<AppSettings> appOptMon)
         {
             _connection = connection ?? throw new ArgumentNullException(nameof(connection));
             _appOptMon = appOptMon;
@@ -91,7 +91,7 @@ namespace Damper.Infrastructure.QueueManagement
                 // Modern v7+ async publishing pattern
                 _traceLog.Trace($"Publishing to exchange");
                 await _channel.BasicPublishAsync(
-                    exchange: _appOptMon.CurrentValue.RabbitMqData.ExchangeName,
+                    exchange: _appOptMon.CurrentValue.RabbitMqSettings.ExchangeName,
                     routingKey: pw.CustomerId,
                     mandatory: true,
                     basicProperties: properties,

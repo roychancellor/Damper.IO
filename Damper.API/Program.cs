@@ -13,8 +13,8 @@ using Damper.Core.OutboundService;
 using Microsoft.Extensions.ObjectPool;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
-using OpenTelemetry.Instrumentation.Runtime;
 using RabbitMQ.Client;
+using Microsoft.Extensions.Options;
 
 var bootstrapLogger = LogManager.Setup().GetCurrentClassLogger();
 
@@ -25,14 +25,20 @@ try
     bootstrapLogger.Info($"Creating web application builder");
     var builder = WebApplication.CreateBuilder(args);
 
-    bootstrapLogger.Info($"Configuring application data");
-    builder.Services.Configure<AppRefData>(builder.Configuration.GetSection("ApplicationData"));
+    bootstrapLogger.Info($"Binding application settings to application reference data object");
+    var appSettingsSection = builder.Configuration.GetSection("ApplicationData");
+    var appSettings = appSettingsSection.Get<AppSettings>() ?? new AppSettings();
+    builder.Services.AddOptions<AppSettings>()
+                    .Bind(appSettingsSection)
+                    .PostConfigure(ard => ard.EgressSettings.SystemHeaders = new(ard.EgressSettings.SystemHeaders, StringComparer.OrdinalIgnoreCase))
+                    .ValidateDataAnnotations()
+                    .ValidateOnStart();
     
     bootstrapLogger.Info($"Setting NLog as the logging provider");
     builder.Logging.ClearProviders();
     builder.Host.UseNLog();
     
-    bootstrapLogger.Info($"Adding services");
+    bootstrapLogger.Info($"Adding services to builder");
     builder.Services.AddRepositories()
                     .AddRabbitMqInfrastructure()
                     .AddQueuePublishing()
@@ -40,25 +46,30 @@ try
     builder.Services.AddSingleton<IChannelRegistry, CustomerChannelRegistry>();
     builder.Services.AddSingleton<IShardMessageProcessor, ShardMessageProcessor>();
     builder.Services.AddSingleton<IEgressPipelineFactory, CustomerEgressPipelineFactory>();
-    for (int i = 0; i < 16; i++)
+    for (int i = 0; i < appSettings.RabbitMqSettings.NumberOfShards; i++)
     {
         int shardIndex = i;
         // Using the explicit generic registration ensures Microsoft.Extensions.Hosting 
         // correctly identifies and tracks each individual IHostedService instance.
-        builder.Services.AddTransient<IHostedService>(sp => new ShardBackgroundWorker(sp.GetRequiredService<IConnection>(), shardIndex, sp.GetRequiredService<IShardMessageProcessor>()));
+        builder.Services.AddTransient<IHostedService>(sp =>
+            new ShardBackgroundWorker(sp.GetRequiredService<IConnection>(),
+                                      shardIndex,
+                                      sp.GetRequiredService<IShardMessageProcessor>(),
+                                      sp.GetRequiredService<IOptionsMonitor<AppSettings>>()));
     }
-    builder.Services.AddHttpClient("DamperEgress")
+    var egressData = appSettings.EgressSettings;
+    builder.Services.AddHttpClient(egressData.HttpClientName)
                     .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
                     {
                         // Keep-alive timeouts protect against dead network pipes
-                        PooledConnectionLifetime = TimeSpan.FromMinutes(2), // FIXES DNS STAGNATION: Recycles sockets safely
-                        PooledConnectionIdleTimeout = TimeSpan.FromMinutes(1),
+                        PooledConnectionLifetime = TimeSpan.FromSeconds(egressData.PooledConnectionLifetimeSeconds), // FIXES DNS STAGNATION: Recycles sockets safely
+                        PooledConnectionIdleTimeout = TimeSpan.FromSeconds(egressData.PooledConnectionIdleTimeoutSeconds),
                         
                         // Performance tuning for massive multi-tenant throughput
-                        MaxConnectionsPerServer = 100, // Limits connections to any *single* customer domain
-                        EnableMultipleHttp2Connections = true // Enhances HTTP/2 streaming multiplexing efficiency
+                        MaxConnectionsPerServer = egressData.MaxConnectionsPerServer, // Limits connections to any *single* customer domain
+                        EnableMultipleHttp2Connections = egressData.EnableMultipleHttp2Connections // Enhances HTTP/2 streaming multiplexing efficiency
                     })
-                    .SetHandlerLifetime(TimeSpan.FromMinutes(2)); // Syncs factory management duration
+                    .SetHandlerLifetime(TimeSpan.FromSeconds(egressData.HandlerLifetimeSeconds)); // Syncs factory management duration
     
     // Register the default object pool provider for making a pool of WebAckContext objects
     // Use a pooled policy for the WebhookAckContext type
@@ -71,22 +82,20 @@ try
 
     // Configure OpenTelemetry
     builder.Services.AddOpenTelemetry()
-        .ConfigureResource(resource => resource.AddService("Damper.OutboundService"))
+        .ConfigureResource(resource => resource.AddService(appSettings.MetricsSettings.ServiceName))
         .WithMetrics(metrics =>
         {
             // Enable built-in .NET runtime metrics
             metrics.AddRuntimeInstrumentation();
             
             // ENABLE CUSTOM METRICS: Must match the string used in: new Meter("Damper.Core", "1.0.0");
-            // TODO: Add this to Constants class or appsettings
-            metrics.AddMeter("Damper.Core");
+            metrics.AddMeter(appSettings.MetricsSettings.MeterName);
 
             // 3. Export to OTLP (e.g., to an OTel Collector, Jaeger, or Honeycomb)
             metrics.AddOtlpExporter(options =>
             {
                 // Set your collector endpoint (default is usually http://localhost:4317)
-                // TODO: Add this to appsettings
-                options.Endpoint = new Uri(builder.Configuration["Otlp:Endpoint"] ?? "http://localhost:4317");
+                options.Endpoint = new Uri(appSettings.MetricsSettings.OtlpEndpoint ?? DamperDefaults.DAMPER_METER_OTLP_ENDPOINT);
                 
                 // If using HTTP instead of gRPC, set this:
                 // options.Protocol = OpenTelemetry.Exporter.OtlpExportProtocol.HttpProtobuf;

@@ -1,16 +1,10 @@
-using System.Text.Json;
-
-/***************************************************************************************************************************/
-// TODO: CONVERT ENTIRE DATA TRANSMISSION PATH TO RAW BYTES. REFER TO GEMINI: https://gemini.google.com/app/e3be0124a487526e
-/***************************************************************************************************************************/
-
 namespace Damper.Infrastructure.Models
 {
     public class WebhookEnvelope
     {
-        public string CorrelationId { get; set; } = "";
-        public string CustomerId { get; set; } = "";
-        public string DestinationUrl { get; set; } = "";
+        public string CorrelationId { get; set; } = string.Empty;
+        public string CustomerId { get; set; } = string.Empty;
+        public string DestinationUrl { get; set; } = string.Empty;
         public ReadOnlyMemory<byte> RawPayloadBytes { get; set; }
         public Dictionary<string, string> Headers { get; set; } = [];
         public DateTime ReceivedAt { get; set; }

@@ -4,10 +4,12 @@ using System.Threading.Channels;
 using Damper.Infrastructure.Logging;
 using Damper.Infrastructure.Models;
 using Damper.Infrastructure.Observability;
+using Damper.Infrastructure.ReferenceData;
 using Damper.Infrastructure.Repositories;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.ObjectPool;
+using Microsoft.Extensions.Options;
 
 namespace Damper.Infrastructure.CustomerChannels
 {
@@ -15,6 +17,8 @@ namespace Damper.Infrastructure.CustomerChannels
     {
         private static readonly ILogger _log = Loggers.Request;
         private static readonly ILogger _traceLog = Loggers.RequestTrace;
+        
+        private readonly IOptionsMonitor<AppSettings> _optMon;
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly Action<string> _onSuspensionTriggered;
         private readonly string _customerId;
@@ -22,9 +26,10 @@ namespace Damper.Infrastructure.CustomerChannels
         private readonly IServiceScopeFactory _scopeFactory; // The standard lifecycle bridge
         private readonly ObjectPool<WebhookAckContext> _contextPool;
         private readonly CancellationToken _ct;
-        private CustomerConfig _config;
+        private CustomerConfig _custConfig;
 
         public ChannelDispatcher(
+            IOptionsMonitor<AppSettings> optMon,
             IHttpClientFactory httpClientFactory, 
             Action<string> onSuspensionTriggered, 
             CustomerConfig initialConfig, 
@@ -33,9 +38,10 @@ namespace Damper.Infrastructure.CustomerChannels
             ObjectPool<WebhookAckContext> contextPool,
             CancellationToken ct)
         {
+            _optMon = optMon;
             _httpClientFactory = httpClientFactory;
             _onSuspensionTriggered = onSuspensionTriggered;
-            _config = initialConfig;
+            _custConfig = initialConfig;
             _customerId = initialConfig.CustomerId;
             _reader = reader;
             _scopeFactory = scopeFactory;
@@ -49,7 +55,7 @@ namespace Damper.Infrastructure.CustomerChannels
         {
             _traceLog.Trace($"RunLoopAsync starting");
 
-            var interval = TimeSpan.FromMilliseconds(_config.DeliveryIntervalMillis);
+            var interval = TimeSpan.FromMilliseconds(_custConfig.DeliveryIntervalMillis);
             using var periodicTimer = new PeriodicTimer(interval);
 
             try
@@ -62,9 +68,9 @@ namespace Damper.Infrastructure.CustomerChannels
     
                     // Drain up to the maximum burst capacity allowed for this interval window
                     // or until there are no more messages to read
-                    while (messagesInBatch < _config.DeliveryRate && _reader.TryRead(out var envelope))
+                    while (messagesInBatch < _custConfig.DeliveryRate && _reader.TryRead(out var envelope))
                     {
-                        deliveryTasks.Add(DeliverWebhookWithRetryAsync(envelope, _config, ct));
+                        deliveryTasks.Add(DeliverWebhookWithRetryAsync(envelope, _custConfig, ct));
                         messagesInBatch++;
                     }
     
@@ -108,7 +114,7 @@ namespace Damper.Infrastructure.CustomerChannels
                         {
                             _traceLog.Trace($"There are new messages but waiting for the configured delivery time for a predictable recovery window.");
                             // Guarantees a true, predictable recovery window between outbound bursts
-                            await Task.Delay(TimeSpan.FromMilliseconds(_config.DeliveryIntervalMillis), ct);
+                            await Task.Delay(TimeSpan.FromMilliseconds(_custConfig.DeliveryIntervalMillis), ct);
                         }
     
                         // Sync configuration definitions once per processing cycle
@@ -148,7 +154,7 @@ namespace Damper.Infrastructure.CustomerChannels
 
                 if (freshConfig != null)
                 {
-                    _config = freshConfig;
+                    _custConfig = freshConfig;
                 }
             }
             catch (Exception ex)
@@ -167,13 +173,12 @@ namespace Damper.Infrastructure.CustomerChannels
 
                 _traceLog.Debug($"DeliverWebhookWithRetryAsync starting | CUST ID: {envelope.CustomerId} | DEST: {envelope.DestinationUrl}");
                 
-                // TODO: Get these from appsettings
-                int maxAttempts = 5;
-                TimeSpan retryBackoff = TimeSpan.FromSeconds(2);
+                int maxAttempts = _optMon.CurrentValue.EgressSettings.MaxSendAttempts;
+                TimeSpan retryBackoff = TimeSpan.FromMilliseconds(_optMon.CurrentValue.EgressSettings.RetryBackoffMillis);
 
                 while (envelope.AttemptCount <= maxAttempts)
                 {
-                    var client = _httpClientFactory.CreateClient("DamperEgress");
+                    var client = _httpClientFactory.CreateClient(_optMon.CurrentValue.EgressSettings.HttpClientName);
                     using var request = new HttpRequestMessage(HttpMethod.Post, config.DestinationURL);
                     request.Content = new ReadOnlyMemoryContent(envelope.RawPayloadBytes);
 
@@ -196,14 +201,14 @@ namespace Damper.Infrastructure.CustomerChannels
                         }
                         request.Content.Headers.ContentType = mediaHeader;
                     }
-                    request.Headers.Add("X-Damper-Correlation-Id", envelope.CorrelationId);
-                    request.Headers.Add("X-Damper-Delivery-Attempt", envelope.AttemptCount.ToString());
+                    request.Headers.Add(DamperDefaults.REQUEST_X_DAMPER_CUSTOMER_ID, envelope.CorrelationId);
+                    request.Headers.Add(DamperDefaults.REQUEST_X_DAMPER_DELIVERY_ATTEMPT, envelope.AttemptCount.ToString());
 
                     try
                     {
                         _traceLog.Debug($"Sending request | CUST ID: {envelope.CustomerId} | URL: {envelope.DestinationUrl}");
                         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                        cts.CancelAfter(TimeSpan.FromSeconds(10));
+                        cts.CancelAfter(TimeSpan.FromMilliseconds(_optMon.CurrentValue.EgressSettings.RequestTimeoutMillis));
                         using var response = await client.SendAsync(request, cts.Token);
 
                         _traceLog.Debug($"Response received | CUST ID: {envelope.CustomerId} | HTTP STATUS: {response.StatusCode}");
@@ -217,12 +222,12 @@ namespace Damper.Infrastructure.CustomerChannels
                         
                         if (Is4XX(response.StatusCode) && !IsTooManyRequests(response.StatusCode))
                         {
-                            _log.Fatal($"Customer returned 4XX status code - Sending to dead letter | CUST ID: {envelope.CustomerId} | HTTP STATUS: {response.StatusCode}");
+                            _log.Fatal($"Customer returned 4XX status code (not 429) - Sending to dead letter | CUST ID: {envelope.CustomerId} | HTTP STATUS: {response.StatusCode}");
                             await FinalizeRejectAsync(envelope);
                             return true; // Return true to keep the pipeline loop alive
                         }
                         
-                        _log.Warn($"Response NOT successful (try {envelope.AttemptCount}) - Executing retry with exponential backoff | CUST ID: {envelope.CustomerId} | HTTP STATUS: {response.StatusCode}");
+                        _log.Warn($"Response NOT successful (try {envelope.AttemptCount}) - retrying with exponential backoff ({retryBackoff.Seconds} sec) | CUST ID: {envelope.CustomerId} | HTTP STATUS: {response.StatusCode}");
                         envelope.AttemptCount++;
                         retryBackoff = await DoExponentialBackoff(retryBackoff, ct);
                     }
@@ -289,21 +294,19 @@ namespace Damper.Infrastructure.CustomerChannels
             return statusCode == HttpStatusCode.TooManyRequests;
         }
 
-        private static async Task<TimeSpan> DoExponentialBackoff(TimeSpan retryBackoff, CancellationToken ct)
+        private async Task<TimeSpan> DoExponentialBackoff(TimeSpan retryBackoff, CancellationToken ct)
         {
-            int jitterMs = Random.Shared.Next(-200, 200);
+            var jitterMilliBase = _optMon.CurrentValue.EgressSettings.RetryBackoffJitterMillis;
+            int jitterMs = Random.Shared.Next(-jitterMilliBase, jitterMilliBase);
             var totalBackoff = retryBackoff + TimeSpan.FromMilliseconds(jitterMs);
 
             await Task.Delay(totalBackoff > TimeSpan.Zero ? totalBackoff : retryBackoff, ct);
             return retryBackoff * 2;
         }
 
-        private static bool IsSystemHeader(string key)
+        private bool IsSystemHeader(string key)
         {
-            return key.Equals("Host", StringComparison.OrdinalIgnoreCase) ||
-                   key.Equals("Content-Length", StringComparison.OrdinalIgnoreCase) ||
-                   key.Equals("Connection", StringComparison.OrdinalIgnoreCase) ||
-                   key.Equals("Content-Type", StringComparison.OrdinalIgnoreCase);
+            return _optMon.CurrentValue.EgressSettings.SystemHeaders.Contains(key);
         }
     }
 }
