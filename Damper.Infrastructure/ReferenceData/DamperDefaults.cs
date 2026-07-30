@@ -5,6 +5,7 @@ namespace Damper.Infrastructure.ReferenceData
         public const string DAMPER_SERVICE_NAME = "Damper.OutboundService";
         public const string DAMPER_METER_NAME = "Damper.Core";
         public const string DAMPER_METER_OTLP_ENDPOINT = "http://localhost:4317";
+        public const string DAMPER_METER_CUSTOMER_ID = "customer_id";
         
         public const string HTTP_CLIENT_NAME = "DamperEgress";
 

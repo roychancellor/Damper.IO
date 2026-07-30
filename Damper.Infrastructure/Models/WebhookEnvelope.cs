@@ -1,3 +1,7 @@
+using System.Net.Http.Headers;
+using Damper.Infrastructure.Repositories;
+using Microsoft.Extensions.ObjectPool;
+
 namespace Damper.Infrastructure.Models
 {
     public class WebhookEnvelope
@@ -42,6 +46,53 @@ namespace Damper.Infrastructure.Models
         {
             Headers = toSet;
             return this;
+        }
+    }
+
+    public static class WebhookEnvelopeExtensions
+    {
+        public static async Task FinalizeAckAsync(this WebhookEnvelope envelope, ObjectPool<WebhookAckContext> contextPool)
+        {
+            if (envelope.AckContext != null)
+            {
+                await envelope.AckContext.AckAsync();
+                contextPool.Return(envelope.AckContext);
+                envelope.AckContext = null;
+            }
+        }
+
+        public static async Task FinalizeRejectAsync(this WebhookEnvelope envelope, ObjectPool<WebhookAckContext> contextPool)
+        {
+            if (envelope.AckContext != null)
+            {
+                await envelope.AckContext.RejectAsync(requeue: false);
+                contextPool.Return(envelope.AckContext);
+                envelope.AckContext = null;
+            }
+        }
+
+        public static async Task FinalizeParkAsync(this WebhookEnvelope envelope, ObjectPool<WebhookAckContext> contextPool)
+        {
+            if (envelope.AckContext != null)
+            {
+                await envelope.AckContext.ParkForRetryAsync(envelope);
+                contextPool.Return(envelope.AckContext);
+                envelope.AckContext = null;
+            }
+        }
+
+        public static bool HasAttemptsRemaining(this WebhookEnvelope envelope, int maxAttempts)
+        {
+            return envelope.AttemptCount <= maxAttempts;
+        }
+
+        public static HttpRequestMessage BuildHttpRequest(this WebhookEnvelope envelope, CustomerConfig custConfig)
+        {
+            var request = new HttpRequestMessage(HttpMethod.Post, custConfig.DestinationURL)
+            {
+                Content = new ReadOnlyMemoryContent(envelope.RawPayloadBytes)
+            };
+            return request;
         }
     }
 }

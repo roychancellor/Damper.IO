@@ -13,10 +13,14 @@ using Microsoft.Extensions.Options;
 
 namespace Damper.Infrastructure.CustomerChannels
 {
-    public class ChannelDispatcher
+    public class ChannelDispatcher : IDispatcher
     {
         private static readonly ILogger _log = Loggers.Request;
         private static readonly ILogger _traceLog = Loggers.RequestTrace;
+
+        private static bool SUCCESS = true;
+        private static bool FAILURE = false;
+        private static bool KEEP_ALIVE = true;
         
         private readonly IOptionsMonitor<AppSettings> _optMon;
         private readonly IHttpClientFactory _httpClientFactory;
@@ -55,9 +59,6 @@ namespace Damper.Infrastructure.CustomerChannels
         {
             _traceLog.Trace($"RunLoopAsync starting");
 
-            var interval = TimeSpan.FromMilliseconds(_custConfig.DeliveryIntervalMillis);
-            using var periodicTimer = new PeriodicTimer(interval);
-
             try
             {
                 while (await _reader.WaitToReadAsync(ct))
@@ -65,61 +66,53 @@ namespace Damper.Infrastructure.CustomerChannels
                     _traceLog.Trace($"Entering while loop awaiting messages from the channel sender");
                     var deliveryTasks = new List<Task<bool>>();
                     int messagesInBatch = 0;
-    
+
                     // Drain up to the maximum burst capacity allowed for this interval window
                     // or until there are no more messages to read
-                    while (messagesInBatch < _custConfig.DeliveryRate && _reader.TryRead(out var envelope))
+                    while (messagesInBatch.IsBelowCustomerRate(_custConfig) && _reader.TryRead(out var envelope))
                     {
                         deliveryTasks.Add(DeliverWebhookWithRetryAsync(envelope, _custConfig, ct));
                         messagesInBatch++;
                     }
-    
-                    if (deliveryTasks.Count > 0)
+
+                    if (deliveryTasks.Count == 0) { continue; }
+
+                    _traceLog.Trace($"Messages actively being sent to customer endpoint - awaiting all delivery tasks for the batch");
+
+                    // Execute the outbound HTTP burst concurrently
+                    var deliveryResults = await Task.WhenAll(deliveryTasks);
+
+                    _traceLog.Trace($"All delivery tasks completed for the batch");
+
+                    // If any single message in this batch completely failed after exhausting internal retries,
+                    // trip the circuit breaker immediately.
+                    if (deliveryResults.HasAtLeastOneError())
                     {
-                        _traceLog.Trace($"Batch of messages ready to send - awaiting all delivery tasks for the batch");
+                        _traceLog.Trace($"Delivery tasks completed with error(s) | ERROR COUNT: {deliveryResults.Count(r => r == false)}");
+                        _log.Error("Circuit breaker triggered for Customer {Id} due to exhausted retry count.", _customerId);
 
-                        // Execute the outbound HTTP burst concurrently
-                        var results = await Task.WhenAll(deliveryTasks);
-                        
-                        _traceLog.Trace($"Delivery tasks completed for the batch");
-
-                        var completedWithErrors = results.Any(success => !success);
-                        if (completedWithErrors)
+                        // Drain anything still buffered but unread - it was pulled off RabbitMQ and is unacked,
+                        // but no delivery task will ever pick it up once this loop exits. Park it for automatic
+                        // retry after cooldown instead of leaving it stranded until the app restarts.
+                        while (_reader.TryRead(out var leftover))
                         {
-                            _traceLog.Trace($"Delivery tasks completed with error(s) | ERROR COUNT: {results.Count(r => r == false)}");
+                            await leftover.FinalizeParkAsync(_contextPool);
                         }
-    
-                        // If any single message in this batch completely failed after exhausting internal retries,
-                        // trip the circuit breaker immediately.
-                        if (completedWithErrors)
-                        {
-                            _log.Error("Circuit breaker triggered for Customer {Id} due to exhausted retry count.", _customerId);
-
-                            // Drain anything still buffered but unread - it was pulled off RabbitMQ and is unacked,
-                            // but no delivery task will ever pick it up once this loop exits. Park it for automatic
-                            // retry after cooldown instead of leaving it stranded until the app restarts.
-                            while (_reader.TryRead(out var leftover))
-                            {
-                                await FinalizeParkAsync(leftover);
-                            }
-
-                            _onSuspensionTriggered(_customerId);
-                            
-                            return;
-                        }
-    
-                        // Only enforce the pacing delay if there is still data waiting in the channel.
-                        // This prevents adding artificial latency to lone, sporadic trickle messages.
-                        if (_reader.CanCount && _reader.Count > 0)
-                        {
-                            _traceLog.Trace($"There are new messages but waiting for the configured delivery time for a predictable recovery window.");
-                            // Guarantees a true, predictable recovery window between outbound bursts
-                            await Task.Delay(TimeSpan.FromMilliseconds(_custConfig.DeliveryIntervalMillis), ct);
-                        }
-    
-                        // Sync configuration definitions once per processing cycle
-                        await RefreshConfigAsync(ct);
+                        _onSuspensionTriggered(_customerId);
+                        return;
                     }
+
+                    // Only enforce the pacing delay if there is still data waiting in the channel.
+                    // This prevents adding artificial latency to lone, sporadic trickle messages.
+                    if (_reader.HasDataWaiting())
+                    {
+                        _traceLog.Trace($"There are new messages but waiting for the configured delivery time for a predictable recovery window.");
+                        // Guarantees a true, predictable recovery window between outbound bursts
+                        await Task.Delay(TimeSpan.FromMilliseconds(_custConfig.DeliveryIntervalMillis), ct);
+                    }
+
+                    // Sync configuration definitions once per processing cycle
+                    await RefreshConfigAsync(ct);
                 }
             }
             finally
@@ -142,7 +135,7 @@ namespace Damper.Infrastructure.CustomerChannels
             }
         }
 
-        private async Task RefreshConfigAsync(CancellationToken ct)
+        public async Task RefreshConfigAsync(CancellationToken ct)
         {
             try
             {
@@ -164,7 +157,7 @@ namespace Damper.Infrastructure.CustomerChannels
             }
         }
         
-        private async Task<bool> DeliverWebhookWithRetryAsync(WebhookEnvelope envelope, CustomerConfig config, CancellationToken ct)
+        public async Task<bool> DeliverWebhookWithRetryAsync(WebhookEnvelope envelope, CustomerConfig custConfig, CancellationToken ct)
         {
             try
             {
@@ -173,60 +166,50 @@ namespace Damper.Infrastructure.CustomerChannels
 
                 _traceLog.Debug($"DeliverWebhookWithRetryAsync starting | CUST ID: {envelope.CustomerId} | DEST: {envelope.DestinationUrl}");
                 
-                int maxAttempts = _optMon.CurrentValue.EgressSettings.MaxSendAttempts;
-                TimeSpan retryBackoff = TimeSpan.FromMilliseconds(_optMon.CurrentValue.EgressSettings.RetryBackoffMillis);
+                var maxAttempts = _optMon.CurrentValue.EgressSettings.MaxSendAttempts;
+                var retryBackoff = TimeSpan.FromMilliseconds(_optMon.CurrentValue.EgressSettings.RetryBackoffMillis);
 
-                while (envelope.AttemptCount <= maxAttempts)
+                while (envelope.HasAttemptsRemaining(maxAttempts))
                 {
                     var client = _httpClientFactory.CreateClient(_optMon.CurrentValue.EgressSettings.HttpClientName);
-                    using var request = new HttpRequestMessage(HttpMethod.Post, config.DestinationURL);
-                    request.Content = new ReadOnlyMemoryContent(envelope.RawPayloadBytes);
+
+                    using var httpRequest = envelope.BuildHttpRequest(custConfig);
 
                     _traceLog.Debug("Getting all HTTP headers ready for request");
-                    foreach (var header in envelope.Headers)
+                    httpRequest.AddOriginalRequestHeaders(envelope, _optMon.CurrentValue.EgressSettings.SystemHeaders);
+                    if (!httpRequest.TryHandleContentTypeHeader(envelope))
                     {
-                        if (IsSystemHeader(header.Key)) { continue; }
-                        request.Headers.TryAddWithoutValidation(header.Key, header.Value);
+                        _log.Fatal($"Content-Type header is not parsable - rejecting to DLQ | CUST ID: {envelope.CustomerId} | CORR ID: {envelope.CorrelationId}");
+                        await envelope.FinalizeRejectAsync(_contextPool);
+                        return KEEP_ALIVE; // Keep the pipeline loop alive
                     }
-
-                    if (envelope.Headers.TryGetValue("Content-Type", out var contentType))
-                    {
-                        // This is validated at ingress, but check again here. If it somehow made it here unparsable, send to DLQ.
-                        var isContentTypeHeaderParsable = MediaTypeHeaderValue.TryParse(contentType, out MediaTypeHeaderValue? mediaHeader);
-                        if (!isContentTypeHeaderParsable)
-                        {
-                            _log.Fatal($"Content-Type header is not parsable | CUST ID: {envelope.CustomerId} | CORR ID: {envelope.CorrelationId}");
-                            await FinalizeRejectAsync(envelope);
-                            return true; // Return true to keep the pipeline loop alive
-                        }
-                        request.Content.Headers.ContentType = mediaHeader;
-                    }
-                    request.Headers.Add(DamperDefaults.REQUEST_X_DAMPER_CUSTOMER_ID, envelope.CorrelationId);
-                    request.Headers.Add(DamperDefaults.REQUEST_X_DAMPER_DELIVERY_ATTEMPT, envelope.AttemptCount.ToString());
+                    httpRequest.AddDamperHeaders(envelope);
 
                     try
                     {
                         _traceLog.Debug($"Sending request | CUST ID: {envelope.CustomerId} | URL: {envelope.DestinationUrl}");
-                        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                        cts.CancelAfter(TimeSpan.FromMilliseconds(_optMon.CurrentValue.EgressSettings.RequestTimeoutMillis));
-                        using var response = await client.SendAsync(request, cts.Token);
+                        using var cts = CancellationTokenSource
+                                        .CreateLinkedTokenSource(ct)
+                                        .SetRequestTimeout(_optMon.CurrentValue.EgressSettings.RequestTimeoutMillis);
+
+                        using var response = await client.SendAsync(httpRequest, cts.Token);
 
                         _traceLog.Debug($"Response received | CUST ID: {envelope.CustomerId} | HTTP STATUS: {response.StatusCode}");
                         if (response.IsSuccessStatusCode)
                         {
                             _log.Info($"Response IS successful | CUST ID: {envelope.CustomerId} | HTTP STATUS: {response.StatusCode}");
-                            DamperMetrics.DeliverySuccessCounter.Add(1, new KeyValuePair<string, object?>("customer_id", envelope.CustomerId));
-                            await FinalizeAckAsync(envelope);
-                            return true;
+                            DamperMetrics.DeliverySuccessCounter.Add(1, new KeyValuePair<string, object?>(DamperDefaults.DAMPER_METER_CUSTOMER_ID, envelope.CustomerId));
+                            await envelope.FinalizeAckAsync(_contextPool);
+                            return SUCCESS;
                         }
-                        
-                        if (Is4XX(response.StatusCode) && !IsTooManyRequests(response.StatusCode))
+
+                        if (response.StatusCode.Is4XX() && !response.StatusCode.IsTooManyRequests())
                         {
                             _log.Fatal($"Customer returned 4XX status code (not 429) - Sending to dead letter | CUST ID: {envelope.CustomerId} | HTTP STATUS: {response.StatusCode}");
-                            await FinalizeRejectAsync(envelope);
-                            return true; // Return true to keep the pipeline loop alive
+                            await envelope.FinalizeRejectAsync(_contextPool);
+                            return KEEP_ALIVE; // Keep the pipeline loop alive
                         }
-                        
+
                         _log.Warn($"Response NOT successful (try {envelope.AttemptCount}) - retrying with exponential backoff ({retryBackoff.Seconds} sec) | CUST ID: {envelope.CustomerId} | HTTP STATUS: {response.StatusCode}");
                         envelope.AttemptCount++;
                         retryBackoff = await DoExponentialBackoff(retryBackoff, ct);
@@ -240,8 +223,8 @@ namespace Damper.Infrastructure.CustomerChannels
                 }
 
                 _log.Error("Exhausted retries for {Id} - Parking for delayed automatic retry.", envelope.CustomerId);
-                await FinalizeParkAsync(envelope); // Send to the parking lot for a time out/retry (the other special paths above will send to DLQ if necessary)
-                return false;
+                await envelope.FinalizeParkAsync(_contextPool); // Send to the parking lot for a time out/retry (the other special paths above will send to DLQ if necessary)
+                return FAILURE;
             }
             finally
             {
@@ -254,46 +237,6 @@ namespace Damper.Infrastructure.CustomerChannels
             }
         }
 
-        private async Task FinalizeAckAsync(WebhookEnvelope envelope)
-        {
-            if (envelope.AckContext != null)
-            {
-                await envelope.AckContext.AckAsync();
-                _contextPool.Return(envelope.AckContext);
-                envelope.AckContext = null;
-            }
-        }
-
-        private async Task FinalizeRejectAsync(WebhookEnvelope envelope)
-        {
-            if (envelope.AckContext != null)
-            {
-                await envelope.AckContext.RejectAsync(requeue: false);
-                _contextPool.Return(envelope.AckContext);
-                envelope.AckContext = null;
-            }
-        }
-
-        private async Task FinalizeParkAsync(WebhookEnvelope envelope)
-        {
-            if (envelope.AckContext != null)
-            {
-                await envelope.AckContext.ParkForRetryAsync(envelope);
-                _contextPool.Return(envelope.AckContext);
-                envelope.AckContext = null;
-            }
-        }
-
-        private static bool Is4XX(HttpStatusCode statusCode)
-        {
-            return (int)statusCode >= 400 && (int)statusCode <= 499;    
-        }
-
-        private static bool IsTooManyRequests(HttpStatusCode statusCode)
-        {
-            return statusCode == HttpStatusCode.TooManyRequests;
-        }
-
         private async Task<TimeSpan> DoExponentialBackoff(TimeSpan retryBackoff, CancellationToken ct)
         {
             var jitterMilliBase = _optMon.CurrentValue.EgressSettings.RetryBackoffJitterMillis;
@@ -303,10 +246,74 @@ namespace Damper.Infrastructure.CustomerChannels
             await Task.Delay(totalBackoff > TimeSpan.Zero ? totalBackoff : retryBackoff, ct);
             return retryBackoff * 2;
         }
+    }
 
-        private bool IsSystemHeader(string key)
+    public static class DispatcherExtensions
+    {
+        public static bool IsBelowCustomerRate(this int messagesInBatch, CustomerConfig _custConfig)
         {
-            return _optMon.CurrentValue.EgressSettings.SystemHeaders.Contains(key);
+            return messagesInBatch < _custConfig.DeliveryRate;
+        }
+
+        public static bool Is4XX(this HttpStatusCode statusCode)
+        {
+            return (int)statusCode >= 400 && (int)statusCode <= 499;    
+        }
+
+        public static bool IsTooManyRequests(this HttpStatusCode statusCode)
+        {
+            return statusCode == HttpStatusCode.TooManyRequests;
+        }
+
+        public static bool IsSystemHeader(this string key, HashSet<string> systemHeaders)
+        {
+            return systemHeaders.Contains(key);
+        }
+
+        public static bool HasAtLeastOneError(this bool[] results)
+        {
+            return results.Any(success => !success);
+        }
+
+        public static bool HasDataWaiting(this ChannelReader<WebhookEnvelope> reader)
+        {
+            return reader.CanCount && reader.Count > 0;
+        }
+
+        public static HttpRequestMessage AddOriginalRequestHeaders(this HttpRequestMessage request, WebhookEnvelope envelope, HashSet<string> systemHeaders)
+        {
+            foreach (var header in envelope.Headers)
+            {
+                if (header.Key.IsSystemHeader(systemHeaders)) { continue; }
+                request.Headers.TryAddWithoutValidation(header.Key, header.Value);
+            }
+            return request;
+        }
+
+        public static bool TryHandleContentTypeHeader(this HttpRequestMessage httpRequest, WebhookEnvelope envelope)
+        {
+            if (envelope.Headers.TryGetValue("Content-Type", out var contentType))
+            {
+                // This is validated at ingress, but check again here. If it somehow made it here unparsable, send to DLQ.
+                if (!MediaTypeHeaderValue.TryParse(contentType, out MediaTypeHeaderValue? mediaHeader))
+                {
+                    return false;
+                }
+                httpRequest.Content?.Headers.ContentType = mediaHeader;
+            }
+            return true;
+        }
+
+        public static void AddDamperHeaders(this HttpRequestMessage httpRequest, WebhookEnvelope envelope)
+        {
+            httpRequest.Headers.Add(DamperDefaults.REQUEST_X_DAMPER_CUSTOMER_ID, envelope.CorrelationId);
+            httpRequest.Headers.Add(DamperDefaults.REQUEST_X_DAMPER_DELIVERY_ATTEMPT, envelope.AttemptCount.ToString());
+        }
+
+        public static CancellationTokenSource SetRequestTimeout(this CancellationTokenSource cts, int timeoutMillis)
+        {
+            cts.CancelAfter(TimeSpan.FromMilliseconds(timeoutMillis));
+            return cts;
         }
     }
 }
