@@ -4,8 +4,6 @@ using Microsoft.Extensions.Hosting;
 using Damper.Infrastructure.QueueManagement;
 using Damper.Infrastructure.Logging;
 using Damper.Infrastructure.Models;
-using Microsoft.Extensions.Primitives;
-using System.Net.Http.Headers;
 
 namespace Damper.Core.IngestionService;
 

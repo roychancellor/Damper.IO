@@ -1,7 +1,6 @@
 using System.Net.Http.Headers;
 using Damper.Infrastructure.Logging;
 using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Primitives;
 
 namespace Damper.Infrastructure.Models
