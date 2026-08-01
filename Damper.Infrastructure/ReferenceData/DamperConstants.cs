@@ -19,6 +19,7 @@ namespace Damper.Infrastructure.ReferenceData
         public const string X_DAMPER_ATTEMPT_COUNT = "x-damper-attempt-count";
 
         public const string REQUEST_X_DAMPER_CUSTOMER_ID = "X-Damper-Customer-Id";
+        public const string REQUEST_X_DAMPER_CORRELATION_ID = "X-Damper-Correlation-Id";
         public const string REQUEST_X_DAMPER_DELIVERY_ATTEMPT = "X-Damper-Delivery-Attempt";
     }
 }

@@ -40,6 +40,7 @@ namespace Damper.Core.OutboundService
                 if (amqpHeaders == null)
                 {
                     _log.Error($"Consumed message is missing AMQP headers - Rejecting to DLQ. | SHARD INDEX: {context.ShardIndex}");
+                    DamperMetrics.SentToDeadLetter.Add(1);
                     await context.RejectAsync(eventArgs.DeliveryTag, requeue: false);
                     return;
                 }

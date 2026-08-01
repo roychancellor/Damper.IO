@@ -18,6 +18,7 @@ namespace Damper.Infrastructure.ReferenceData
         [Range(1, ushort.MaxValue)] public ushort PrefetchCount { get; set; }
         [Required] public bool IsPrefetchGlobal { get; set; }
         [Required] public string ParkingLotExchange { get; set; } = string.Empty;
+        [Required] public string ParkingLotQueue { get; set; } = string.Empty;
         [Range(0, int.MaxValue)] public int ParkingLotBaseTTLMillis { get; set; }
         [Range(0, int.MaxValue)] public int ParkingLotJitterMillis { get; set; }
         [Range(1, int.MaxValue)] public int DefaultMaxQueueCapacity { get; set; }

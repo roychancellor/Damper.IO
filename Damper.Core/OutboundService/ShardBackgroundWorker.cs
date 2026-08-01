@@ -44,6 +44,8 @@ namespace Damper.Core.OutboundService
             var queueName = $"{rmqData.IngressShardPrefix}{_shardIndex:D2}";
             var dlxName = rmqData.DeadLetterExchange;
             var dlqName = rmqData.DeadLetterQueue;
+            var parkxName = rmqData.ParkingLotExchange;
+            var parkQueue = rmqData.ParkingLotQueue;
 
             try
             {
@@ -51,6 +53,8 @@ namespace Damper.Core.OutboundService
                 await _channel.ExchangeDeclarePassiveAsync(dlxName, cancellationToken: stoppingToken);
                 await _channel.QueueDeclarePassiveAsync(dlqName, cancellationToken: stoppingToken);
                 await _channel.QueueDeclarePassiveAsync(queueName, cancellationToken: stoppingToken);
+                await _channel.ExchangeDeclarePassiveAsync(parkxName, cancellationToken: stoppingToken);
+                await _channel.QueueDeclarePassiveAsync(parkQueue, cancellationToken: stoppingToken);
             }
             catch (OperationInterruptedException ex)
             {

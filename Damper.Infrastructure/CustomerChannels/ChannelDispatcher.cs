@@ -207,6 +207,7 @@ namespace Damper.Infrastructure.CustomerChannels
                         if (response.StatusCode.Is4XX() && !response.StatusCode.IsTooManyRequests())
                         {
                             _log.Fatal($"<==== Customer returned 4XX status code (not 429) - Sending to dead letter | CUST ID: {envelope.CustomerId} | HTTP STATUS: {response.StatusCode}");
+                            DamperMetrics.SentToDeadLetter.Add(1);
                             await envelope.FinalizeRejectAsync(_contextPool);
                             return KEEP_ALIVE; // Keep the pipeline loop alive
                         }
@@ -224,6 +225,7 @@ namespace Damper.Infrastructure.CustomerChannels
                 }
 
                 _log.Error("<==== Exhausted retries for customer {Id} - Parking for delayed automatic retry.", envelope.CustomerId);
+                DamperMetrics.ParkedForRetryCounter.Add(1);
                 await envelope.FinalizeParkAsync(_contextPool); // Send to the parking lot for a time out/retry (the other special paths above will send to DLQ if necessary)
                 return FAILURE;
             }
@@ -307,7 +309,7 @@ namespace Damper.Infrastructure.CustomerChannels
 
         public static void AddDamperHeaders(this HttpRequestMessage httpRequest, WebhookEnvelope envelope)
         {
-            httpRequest.Headers.Add(DamperConstants.REQUEST_X_DAMPER_CUSTOMER_ID, envelope.CorrelationId);
+            httpRequest.Headers.Add(DamperConstants.REQUEST_X_DAMPER_CORRELATION_ID, envelope.CorrelationId);
             httpRequest.Headers.Add(DamperConstants.REQUEST_X_DAMPER_DELIVERY_ATTEMPT, envelope.AttemptCount.ToString());
         }
 
