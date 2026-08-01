@@ -24,7 +24,7 @@ namespace Damper.Infrastructure.QueueManagement
             _appOptMon = appOptMon;
         }
 
-        public async Task<bool> PublishAsync(PublishWrapper pw)
+        public async Task<bool> TryPublishAsync(PublishWrapper pw)
         {
             try
             {

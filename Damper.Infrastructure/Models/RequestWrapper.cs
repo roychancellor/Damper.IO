@@ -1,4 +1,8 @@
+using System.Net.Http.Headers;
+using Damper.Infrastructure.Logging;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Primitives;
 
 namespace Damper.Infrastructure.Models
 {
@@ -40,6 +44,44 @@ namespace Damper.Infrastructure.Models
                         HttpHeaders.Count == 0 ||
                         RequestBody == null
                     );
+        }
+
+        public async Task<ReadOnlyMemory<byte>> ReadRequestBodyToMemoryAsync()
+        {
+            // Use ArrayPool for high-performance, non-allocating byte storage
+            var ms = new MemoryStream();
+            await this.RequestBody.CopyToAsync(ms);
+            return ms.GetBuffer().AsMemory(0, (int)ms.Length);
+        }
+
+        public Result<string> LogAndGenerateFailureResult()
+        {
+            Loggers.Request.Error($"{this.ErrorMessage} | CUSTOMER: {this.CustomerId}");
+            return Result<string>.Failure(this.ErrorType, this.ErrorMessage);
+        }
+
+        public bool TryValidateContentType(out Result<string> result)
+        {
+            var contentTypeExists = this.HttpHeaders.TryGetValue("Content-Type", out StringValues contentTypeReceived);
+            if (contentTypeExists)
+            {
+                Loggers.RequestTrace.Trace($"Request has Content-Type = {contentTypeReceived}");
+                // Check for multiple Content-Type headers - a violation
+                if (contentTypeReceived.Count > 1)
+                {
+                    result =  this.SetError($"The incoming webhook has multiple Content-Type header entries | HDR: {contentTypeReceived}", ErrorType.BadRequest)
+                                .LogAndGenerateFailureResult();
+                    return false;
+                }
+                if (!MediaTypeHeaderValue.TryParse(contentTypeReceived, out _))
+                {
+                    result = this.SetError($"The incoming webhook Content-Type header is unparsable | HDR: {contentTypeReceived}", ErrorType.BadRequest)
+                            .LogAndGenerateFailureResult();
+                    return false;
+                }
+            }
+            result = Result<string>.Success(this.CorrelationId);
+            return true;
         }
     }
 }

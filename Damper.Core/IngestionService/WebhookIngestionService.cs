@@ -44,47 +44,36 @@ public class WebhookIngestionService : IWebhookIngestionService
         var customerConfig = await _customerRepo.GetByIdAsync(customerId, rw.CancelToken);
         if (customerConfig == null)
         {
-            return LogAndGenerateFailureResult(rw.SetError($"Customer configuration is missing or corrupted", ErrorType.ServerError));
+            return rw.SetError($"Customer configuration is missing or corrupted", ErrorType.ServerError).LogAndGenerateFailureResult();
         }
 
         // Verify the Content-Type header is parsable as a known type, as the dispatcher needs it to be correct
         // to send a valid request to the customer. Checking here allows for HTTP 400 if it is not parsable.
-        var contentTypeExists = rw.HttpHeaders.TryGetValue("Content-Type", out StringValues contentTypeReceived);
-        if (contentTypeExists)
+        if (!rw.TryValidateContentType(out Result<string> badRequestResult))
         {
-            _traceLog.Trace($"Request has Content-Type = {contentTypeReceived}");
-            // Check for multiple Content-Type headers - a violation
-            if (contentTypeReceived.Count > 1)
-            {
-                return LogAndGenerateFailureResult(rw.SetError($"The incoming webhook has multiple Content-Type header entries | HDR: {contentTypeReceived}",
-                                                   ErrorType.BadRequest));
-            }
-            if (!MediaTypeHeaderValue.TryParse(contentTypeReceived, out _))
-            {
-                return LogAndGenerateFailureResult(rw.SetError($"The incoming webhook Content-Type header is unparsable | HDR: {contentTypeReceived}",
-                                                   ErrorType.BadRequest));
-            }
+            return badRequestResult;
         }
-
-        // To preserve the webhook payload byte-for-byte, convert it to a byte array
+        
+        // Preserve the webhook payload byte-for-byte (payload agnostic)
         _traceLog.Trace($"Reading request body to bytes");
-        var rawBody = await ReadRequestBodyToMemoryAsync(rw);
-        if (rawBody.IsEmpty)
+        var rawBodyBytes = await rw.ReadRequestBodyToMemoryAsync();
+        if (rawBodyBytes.IsEmpty)
         {
-            return LogAndGenerateFailureResult(rw.SetError("The incoming webhook payload cannot be null or empty", ErrorType.BadRequest));
+            return rw.SetError("The incoming webhook payload cannot be null or empty", ErrorType.BadRequest).LogAndGenerateFailureResult();
         }
-        _traceLog.Trace($"Read request body successfully | NUM BYTES: {rawBody.Length}");
+        _traceLog.Trace($"Read request body successfully | NUM BYTES: {rawBodyBytes.Length}");
 
-        var headerDictionary = rw.HttpHeaders.ToDictionary(h => h.Key, h => h.Value.ToString());
+        var httpHeaderDictionary = rw.HttpHeaders.ToDictionary(h => h.Key, h => h.Value.ToString());
 
         _traceLog.Trace($"Building Webhook Envelope");
-        var toPublishEnvelope = WebhookEnvelope.BuildBase(rw)
-                                               .SetDestination(customerConfig.DestinationURL)
-                                               .SetPayload(rawBody)
-                                               .SetHeaders(headerDictionary);
+        var toPublishEnvelope = WebhookEnvelope
+                                .BuildBase(rw)
+                                .SetDestination(customerConfig.DestinationURL)
+                                .SetPayload(rawBodyBytes)
+                                .SetHeaders(httpHeaderDictionary);
         if (toPublishEnvelope == null || toPublishEnvelope.RawPayloadBytes.IsEmpty)
         {
-            return LogAndGenerateFailureResult(rw.SetError("Webhook Envelope to publish is null or empty of content", ErrorType.BadRequest));
+            return rw.SetError("Webhook Envelope to publish is null or empty of content", ErrorType.BadRequest).LogAndGenerateFailureResult();
         }
 
         // By business decision, we are passing a combined token that will prevent publishing if the HTTP request
@@ -94,15 +83,15 @@ public class WebhookIngestionService : IWebhookIngestionService
         try
         {
             _traceLog.Trace($"Building Publish Wrapper and publishing to queue");
-            var pw = PublishWrapper.BuildBase(linkedCts.Token, shouldThrow: true)
-                                   .SetCorrelationID(correlationId)
-                                   .SetCustomerID(customerId)
-                                   .SetPayload(toPublishEnvelope);
+            var pw = PublishWrapper
+                     .BuildBase(linkedCts.Token, shouldThrow: true)
+                     .SetCorrelationID(correlationId)
+                     .SetCustomerID(customerId)
+                     .SetPayload(toPublishEnvelope);
             
-            var isPublishSuccessful = await _queuePublisher.PublishAsync(pw);
-            if (!isPublishSuccessful)
+            if (!await _queuePublisher.TryPublishAsync(pw))
             {
-                return LogAndGenerateFailureResult(rw.SetError("Unable to publish ingested webhook payload to message broker", ErrorType.ServerError));
+                return rw.SetError("Unable to publish ingested webhook payload to message broker", ErrorType.ServerError).LogAndGenerateFailureResult();
             }
         }
         catch (OperationCanceledException) when (_appLifetime.ApplicationStopping.IsCancellationRequested)
@@ -113,21 +102,7 @@ public class WebhookIngestionService : IWebhookIngestionService
 
         // Success! Return a tracking ID (correlation ID) back to the API
         _traceLog.Trace($"<==== ProcessIngressAsync FINISHED | CUSTOMER: {customerId}");
-        _log.Info($"<==== Webhook request processed | CUSTOMER: {customerId}");
+        _log.Info($"<==== Webhook request ingested and published | CUSTOMER: {customerId}");
         return Result<string>.Success(correlationId);
-    }
-
-    private static async Task<ReadOnlyMemory<byte>> ReadRequestBodyToMemoryAsync(RequestWrapper rw)
-    {
-        // Use ArrayPool for high-performance, non-allocating byte storage
-        var ms = new MemoryStream();
-        await rw.RequestBody.CopyToAsync(ms);
-        return ms.GetBuffer().AsMemory(0, (int)ms.Length);
-    }
-
-    private static Result<string> LogAndGenerateFailureResult(RequestWrapper rw)
-    {
-        _log.Error($"{rw.ErrorMessage} | CUSTOMER: {rw.CustomerId}");
-        return Result<string>.Failure(rw.ErrorType, rw.ErrorMessage);
     }
 }
