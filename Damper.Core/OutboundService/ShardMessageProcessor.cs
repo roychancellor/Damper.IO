@@ -85,7 +85,7 @@ namespace Damper.Core.OutboundService
                 if (canWrite && !pipeline.BackgroundTask.IsCompleted && pipeline.Writer.TryWrite(envelope))
                 {
                     // DO NOT ACK HERE!!! LET THE CHANNEL DISPATCHER HANDLE THE ACK WHEN IT KNOWS THE OUTCOME
-                    _traceLog.Info($"<==== ProcessMessageAsync: Successfully enqueued envelope in channel | CUST ID: {envelope.CustomerId} | DELIVERY TAG: {eventArgs.DeliveryTag}");
+                    _traceLog.Trace($"<==== ProcessMessageAsync: Successfully enqueued envelope in channel | CUST ID: {envelope.CustomerId} | DELIVERY TAG: {eventArgs.DeliveryTag}");
                     _log.Info($"<==== Successfully enqueued envelope in channel | CUST ID: {envelope.CustomerId} | DELIVERY TAG: {eventArgs.DeliveryTag}");
                 }
                 else

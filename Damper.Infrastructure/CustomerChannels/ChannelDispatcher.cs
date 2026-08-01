@@ -187,7 +187,8 @@ namespace Damper.Infrastructure.CustomerChannels
 
                     try
                     {
-                        _traceLog.Debug($"Sending request | CUST ID: {envelope.CustomerId} | URL: {envelope.DestinationUrl}");
+                        _log.Info($"====> Sending envelope to customer | CUST ID: {envelope.CustomerId} | URL: {envelope.DestinationUrl}");
+                        _traceLog.Debug($"Sending HTTP POST request now | CUST ID: {envelope.CustomerId} | URL: {envelope.DestinationUrl}");
                         using var cts = CancellationTokenSource
                                         .CreateLinkedTokenSource(ct)
                                         .SetRequestTimeout(_optMon.CurrentValue.EgressSettings.RequestTimeoutMillis);
@@ -197,7 +198,7 @@ namespace Damper.Infrastructure.CustomerChannels
                         _traceLog.Debug($"Response received | CUST ID: {envelope.CustomerId} | HTTP STATUS: {response.StatusCode}");
                         if (response.IsSuccessStatusCode)
                         {
-                            _log.Info($"Response IS successful | CUST ID: {envelope.CustomerId} | HTTP STATUS: {response.StatusCode}");
+                            _log.Info($"<==== Customer returned SUCCESS | CUST ID: {envelope.CustomerId} | HTTP STATUS: {response.StatusCode}");
                             DamperMetrics.DeliverySuccessCounter.Add(1, new KeyValuePair<string, object?>(DamperConstants.DAMPER_METER_CUSTOMER_ID, envelope.CustomerId));
                             await envelope.FinalizeAckAsync(_contextPool);
                             return SUCCESS;
@@ -205,24 +206,24 @@ namespace Damper.Infrastructure.CustomerChannels
 
                         if (response.StatusCode.Is4XX() && !response.StatusCode.IsTooManyRequests())
                         {
-                            _log.Fatal($"Customer returned 4XX status code (not 429) - Sending to dead letter | CUST ID: {envelope.CustomerId} | HTTP STATUS: {response.StatusCode}");
+                            _log.Fatal($"<==== Customer returned 4XX status code (not 429) - Sending to dead letter | CUST ID: {envelope.CustomerId} | HTTP STATUS: {response.StatusCode}");
                             await envelope.FinalizeRejectAsync(_contextPool);
                             return KEEP_ALIVE; // Keep the pipeline loop alive
                         }
 
-                        _log.Warn($"Response NOT successful (try {envelope.AttemptCount}) - retrying with exponential backoff ({retryBackoff.Seconds} sec) | CUST ID: {envelope.CustomerId} | HTTP STATUS: {response.StatusCode}");
+                        _log.Warn($"<==== Customer request FAILED (try {envelope.AttemptCount}) - retrying with exponential backoff ({retryBackoff.Seconds} sec) | CUST ID: {envelope.CustomerId} | HTTP STATUS: {response.StatusCode}");
                         envelope.AttemptCount++;
                         retryBackoff = await DoExponentialBackoff(retryBackoff, ct);
                     }
                     catch (Exception ex)
                     {
-                        _log.Error("Transient error delivering webhook for {Id}. Attempt {Attempt} - Executing retry with exponential backoff ", envelope.CustomerId, envelope.AttemptCount, ex);
+                        _log.Error("<==== Transient error delivering webhook for {Id}. Attempt {Attempt} - Executing retry with exponential backoff ", envelope.CustomerId, envelope.AttemptCount, ex);
                         envelope.AttemptCount++;
                         retryBackoff = await DoExponentialBackoff(retryBackoff, ct);
                     }
                 }
 
-                _log.Error("Exhausted retries for {Id} - Parking for delayed automatic retry.", envelope.CustomerId);
+                _log.Error("<==== Exhausted retries for customer {Id} - Parking for delayed automatic retry.", envelope.CustomerId);
                 await envelope.FinalizeParkAsync(_contextPool); // Send to the parking lot for a time out/retry (the other special paths above will send to DLQ if necessary)
                 return FAILURE;
             }

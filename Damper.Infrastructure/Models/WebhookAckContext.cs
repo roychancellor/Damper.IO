@@ -16,10 +16,9 @@ namespace Damper.Infrastructure.Models
         public async Task RejectAsync(bool requeue = false) => await ExecuteSafeAsync(async () => 
         {
             // Add this logging to verify the tag is valid (it must be > 0)
-            _log.Info("Attempting to Nack DeliveryTag: {Tag} on Shard: {Idx}", DeliveryTag, ShardIndex);
+            _log.Info("<<< Attempting to Reject DeliveryTag: {Tag} on Shard: {Idx} >>>", DeliveryTag, ShardIndex);
             
-            if (DeliveryTag == 0)
-                throw new InvalidOperationException("Cannot Reject: DeliveryTag is 0.");
+            if (DeliveryTag == 0) throw new InvalidOperationException("Cannot Reject: DeliveryTag is 0.");
                 
             await ShardContext!.RejectAsync(DeliveryTag, requeue);
         });
@@ -30,9 +29,9 @@ namespace Damper.Infrastructure.Models
             try { await action(); }
             catch (Exception ex)
             {
-                _log.Error(ex, "Failed to ACK/NACK delivery tag {Tag} on Shard {Idx}", DeliveryTag, ShardIndex);
+                _log.Error(ex, "<<< Failed to ACK/NACK delivery tag {Tag} on Shard {Idx} >>>", DeliveryTag, ShardIndex);
                 // LOG THE FULL EXCEPTION DETAILS
-                _log.Error(ex, "CRITICAL: RabbitMQ Protocol Error on Shard {Idx}. Tag: {Tag}", ShardIndex, DeliveryTag);
+                _log.Error(ex, "<<< CRITICAL: RabbitMQ Protocol Error on Shard {Idx}. Tag: {Tag} >>>", ShardIndex, DeliveryTag);
                 throw; // DO NOT SWALLOW THIS EXCEPTION
             }
         }
