@@ -10,7 +10,7 @@ namespace Damper.Infrastructure.Observability
             Meter.CreateCounter<long>("damper.messages.parked", "messages", "Count of messages moved to parking lot");
 
         public static readonly Counter<long> SentToDeadLetter = 
-            Meter.CreateCounter<long>("damper.messages.dead-letted", "messages", "Count of messages moved to DLQ");
+            Meter.CreateCounter<long>("damper.messages.dead.lettered", "messages", "Count of messages moved to DLQ");
 
         public static readonly Counter<long> DeliverySuccessCounter = 
             Meter.CreateCounter<long>("damper.messages.delivered", "messages", "Count of successful webhook deliveries");

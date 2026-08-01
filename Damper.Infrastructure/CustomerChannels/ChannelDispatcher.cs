@@ -180,6 +180,7 @@ namespace Damper.Infrastructure.CustomerChannels
                     if (!httpRequest.TryHandleContentTypeHeader(envelope))
                     {
                         _log.Fatal($"Content-Type header is not parsable - rejecting to DLQ | CUST ID: {envelope.CustomerId} | CORR ID: {envelope.CorrelationId}");
+                        DamperMetrics.SentToDeadLetter.Add(1);
                         await envelope.FinalizeRejectAsync(_contextPool);
                         return KEEP_ALIVE; // Keep the pipeline loop alive
                     }
