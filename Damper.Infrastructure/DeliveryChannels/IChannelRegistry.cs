@@ -6,7 +6,7 @@ namespace Damper.Infrastructure.ChannelRegistry
 {
     public interface IChannelRegistry
     {
-        Task<CustomerEgressPipeline> GetOrCreatePipelineAsync(string customerId);
+        Task<EgressPipeline> GetOrCreatePipelineAsync(string customerId);
         void MarkAsSuspended(string customerId);
         Task AutoResumeAfterCooldownAsync(string customerId, TimeSpan cooldown);
         void ResumeCustomer(string customerId);

@@ -1,6 +1,7 @@
 using System.Threading.Channels;
+using Damper.Infrastructure.CustomerChannels;
 using Damper.Infrastructure.Logging;
-using Damper.Infrastructure.Models;
+using Damper.Infrastructure.MessageTransport;
 using Damper.Infrastructure.ReferenceData;
 using Damper.Infrastructure.Repositories;
 using Microsoft.Extensions.DependencyInjection;
@@ -8,20 +9,20 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.ObjectPool;
 using Microsoft.Extensions.Options;
 
-namespace Damper.Infrastructure.CustomerChannels
+namespace Damper.Infrastructure.DeliveryChannels
 {
-    public class CustomerEgressPipelineFactory : IEgressPipelineFactory
+    public class EgressPipelineFactory : IEgressPipelineFactory
     {
         private static ILogger _log = Loggers.Request;
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly IServiceScopeFactory _scopeFactory;
-        private readonly ObjectPool<WebhookAckContext> _contextPool;
+        private readonly ObjectPool<MessageAckContext> _contextPool;
         private readonly IOptionsMonitor<AppSettings> _optMon;
 
-        public CustomerEgressPipelineFactory(IHttpClientFactory httpClientFactory,
-                                             IServiceScopeFactory scopeFactory,
-                                             ObjectPool<WebhookAckContext> contextPool,
-                                             IOptionsMonitor<AppSettings> optMon)
+        public EgressPipelineFactory(IHttpClientFactory httpClientFactory,
+                                     IServiceScopeFactory scopeFactory,
+                                     ObjectPool<MessageAckContext> contextPool,
+                                     IOptionsMonitor<AppSettings> optMon)
         {
             _httpClientFactory = httpClientFactory;
             _scopeFactory = scopeFactory;
@@ -29,7 +30,7 @@ namespace Damper.Infrastructure.CustomerChannels
             _optMon = optMon;
         }
 
-        public CustomerEgressPipeline CreatePipeline(CustomerConfig customerConfig, Action<string> onSuspensionTriggered, CancellationToken ct)
+        public EgressPipeline CreatePipeline(CustomerConfig customerConfig, Action<string> onSuspensionTriggered, CancellationToken ct)
         {
             var bufferSize = customerConfig.MaxQueueCapacity > 0
                            ? customerConfig.MaxQueueCapacity
@@ -42,7 +43,7 @@ namespace Damper.Infrastructure.CustomerChannels
                 SingleReader = true
             };
 
-            var channel = Channel.CreateBounded<WebhookEnvelope>(channelOptions);
+            var channel = Channel.CreateBounded<MessageEnvelope>(channelOptions);
 
             // Explicitly start the dispatcher background worker here
             var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -80,7 +81,7 @@ namespace Damper.Infrastructure.CustomerChannels
                 }
             }, ct);
 
-            return new CustomerEgressPipeline(channel.Writer, tcs.Task, CancellationTokenSource.CreateLinkedTokenSource(ct));
+            return new EgressPipeline(channel.Writer, tcs.Task, CancellationTokenSource.CreateLinkedTokenSource(ct));
         }
     }
 }

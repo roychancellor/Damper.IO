@@ -1,6 +1,6 @@
 namespace Damper.Infrastructure.Repositories;
 
-public class FileSystemCustomerRepository : ICustomerRepository
+public class FileSystemIntegrationRepository : IIntegrationRepository
 {
     private static readonly List<CustomerConfig> _customers =
     [

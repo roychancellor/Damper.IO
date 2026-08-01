@@ -4,14 +4,14 @@ using Microsoft.Extensions.Options;
 using System.Collections.Concurrent;
 namespace Damper.Infrastructure.Repositories;
 
-public class CachedCustomerRepository : ICustomerRepository
+public class CachedIntegrationRepository : IIntegrationRepository
 {
-    private readonly ICustomerRepository _durableRepo;
+    private readonly IIntegrationRepository _durableRepo;
     private readonly IMemoryCache _memoryCache;
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _locks = new();
     private IOptionsMonitor<AppSettings> _optMon;
 
-    public CachedCustomerRepository(ICustomerRepository innerRepository, IMemoryCache memoryCache, IOptionsMonitor<AppSettings> optMon)
+    public CachedIntegrationRepository(IIntegrationRepository innerRepository, IMemoryCache memoryCache, IOptionsMonitor<AppSettings> optMon)
     {
         _durableRepo = innerRepository;
         _memoryCache = memoryCache;

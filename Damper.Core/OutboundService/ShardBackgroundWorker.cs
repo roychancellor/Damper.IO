@@ -1,5 +1,5 @@
 using Damper.Infrastructure.Logging;
-using Damper.Infrastructure.Models;
+using Damper.Infrastructure.MessageTransport;
 using Damper.Infrastructure.ReferenceData;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -109,7 +109,7 @@ namespace Damper.Core.OutboundService
                 }
             }
             public async Task NackAsync(ulong deliveryTag, bool multiple, bool requeue) => await _channel.BasicNackAsync(deliveryTag, multiple, requeue);
-            public async Task ParkForRetryAsync(WebhookEnvelope envelope, ulong deliveryTag)
+            public async Task ParkForRetryAsync(MessageEnvelope envelope, ulong deliveryTag)
             {
                 var headers = new Dictionary<string, object?>
                 {

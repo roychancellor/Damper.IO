@@ -1,12 +1,12 @@
 using System.Threading.Channels;
-using Damper.Infrastructure.Models;
+using Damper.Infrastructure.MessageTransport;
 
 namespace Damper.Infrastructure.CustomerChannels
 {
-    public class SuspendedChannelWriter : ChannelWriter<WebhookEnvelope>
+    public class SuspendedChannelWriter : ChannelWriter<MessageEnvelope>
     {
         // Always returns false instantly to signal to the Shard Worker that it cannot take the message
-        public override bool TryWrite(WebhookEnvelope item) => false;
+        public override bool TryWrite(MessageEnvelope item) => false;
 
         public override ValueTask<bool> WaitToWriteAsync(CancellationToken ct) => ValueTask.FromResult(false);
     }

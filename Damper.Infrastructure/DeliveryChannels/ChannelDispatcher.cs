@@ -1,8 +1,9 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Threading.Channels;
+using Damper.Infrastructure.CustomerChannels;
 using Damper.Infrastructure.Logging;
-using Damper.Infrastructure.Models;
+using Damper.Infrastructure.MessageTransport;
 using Damper.Infrastructure.Observability;
 using Damper.Infrastructure.ReferenceData;
 using Damper.Infrastructure.Repositories;
@@ -11,7 +12,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.ObjectPool;
 using Microsoft.Extensions.Options;
 
-namespace Damper.Infrastructure.CustomerChannels
+namespace Damper.Infrastructure.DeliveryChannels
 {
     public class ChannelDispatcher : IDispatcher
     {
@@ -26,9 +27,9 @@ namespace Damper.Infrastructure.CustomerChannels
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly Action<string> _onSuspensionTriggered;
         private readonly string _customerId;
-        private readonly ChannelReader<WebhookEnvelope> _reader;
+        private readonly ChannelReader<MessageEnvelope> _reader;
         private readonly IServiceScopeFactory _scopeFactory; // The standard lifecycle bridge
-        private readonly ObjectPool<WebhookAckContext> _contextPool;
+        private readonly ObjectPool<MessageAckContext> _contextPool;
         private readonly CancellationToken _ct;
         private CustomerConfig _custConfig;
 
@@ -37,9 +38,9 @@ namespace Damper.Infrastructure.CustomerChannels
             IHttpClientFactory httpClientFactory, 
             Action<string> onSuspensionTriggered, 
             CustomerConfig initialConfig, 
-            ChannelReader<WebhookEnvelope> reader, 
+            ChannelReader<MessageEnvelope> reader, 
             IServiceScopeFactory scopeFactory,
-            ObjectPool<WebhookAckContext> contextPool,
+            ObjectPool<MessageAckContext> contextPool,
             CancellationToken ct)
         {
             _optMon = optMon;
@@ -142,7 +143,7 @@ namespace Damper.Infrastructure.CustomerChannels
                 _traceLog.Trace($"Refreshing customer configuration | CUST ID: {_customerId}");
 
                 using var scope = _scopeFactory.CreateScope();
-                var repo = scope.ServiceProvider.GetRequiredService<ICustomerRepository>();
+                var repo = scope.ServiceProvider.GetRequiredService<IIntegrationRepository>();
                 var freshConfig = await repo.GetByIdAsync(_customerId, ct);
 
                 if (freshConfig != null)
@@ -157,7 +158,7 @@ namespace Damper.Infrastructure.CustomerChannels
             }
         }
         
-        public async Task<bool> DeliverWebhookWithRetryAsync(WebhookEnvelope envelope, CustomerConfig custConfig, CancellationToken ct)
+        public async Task<bool> DeliverWebhookWithRetryAsync(MessageEnvelope envelope, CustomerConfig custConfig, CancellationToken ct)
         {
             try
             {
@@ -279,12 +280,12 @@ namespace Damper.Infrastructure.CustomerChannels
             return results.Any(success => !success);
         }
 
-        public static bool HasDataWaiting(this ChannelReader<WebhookEnvelope> reader)
+        public static bool HasDataWaiting(this ChannelReader<MessageEnvelope> reader)
         {
             return reader.CanCount && reader.Count > 0;
         }
 
-        public static HttpRequestMessage AddOriginalRequestHeaders(this HttpRequestMessage request, WebhookEnvelope envelope, HashSet<string> systemHeaders)
+        public static HttpRequestMessage AddOriginalRequestHeaders(this HttpRequestMessage request, MessageEnvelope envelope, HashSet<string> systemHeaders)
         {
             foreach (var header in envelope.Headers)
             {
@@ -294,7 +295,7 @@ namespace Damper.Infrastructure.CustomerChannels
             return request;
         }
 
-        public static bool TryHandleContentTypeHeader(this HttpRequestMessage httpRequest, WebhookEnvelope envelope)
+        public static bool TryHandleContentTypeHeader(this HttpRequestMessage httpRequest, MessageEnvelope envelope)
         {
             if (envelope.Headers.TryGetValue("Content-Type", out var contentType))
             {
@@ -308,7 +309,7 @@ namespace Damper.Infrastructure.CustomerChannels
             return true;
         }
 
-        public static void AddDamperHeaders(this HttpRequestMessage httpRequest, WebhookEnvelope envelope)
+        public static void AddDamperHeaders(this HttpRequestMessage httpRequest, MessageEnvelope envelope)
         {
             httpRequest.Headers.Add(DamperConstants.REQUEST_X_DAMPER_CORRELATION_ID, envelope.CorrelationId);
             httpRequest.Headers.Add(DamperConstants.REQUEST_X_DAMPER_DELIVERY_ATTEMPT, envelope.AttemptCount.ToString());

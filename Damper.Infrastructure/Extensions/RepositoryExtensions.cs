@@ -11,14 +11,14 @@ namespace Damper.Infrastructure.Extensions
         public static IServiceCollection AddRepositories(this IServiceCollection services)
         {
             services.AddMemoryCache();
-            services.AddScoped<PostgreSqlCustomerRepository>();
-            services.AddScoped<FileSystemCustomerRepository>();
+            services.AddScoped<PostgreSqlIntegrationRepository>();
+            services.AddScoped<FileSystemIntegrationRepository>();
 
             // Register the decorator to intercept calls
-            services.AddScoped<ICustomerRepository>(provider => 
-                new CachedCustomerRepository(
+            services.AddScoped<IIntegrationRepository>(provider => 
+                new CachedIntegrationRepository(
                     //provider.GetRequiredService<PostgreSqlCustomerRepository>(),
-                    provider.GetRequiredService<FileSystemCustomerRepository>(),
+                    provider.GetRequiredService<FileSystemIntegrationRepository>(),
                     provider.GetRequiredService<IMemoryCache>(),
                     provider.GetRequiredService<IOptionsMonitor<AppSettings>>()
                 ));

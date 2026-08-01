@@ -1,5 +1,5 @@
 using System.Text;
-using Damper.Infrastructure.Models;
+using Damper.Infrastructure.MessageTransport;
 
 namespace Damper.Infrastructure.QueueManagement
 {
@@ -7,11 +7,11 @@ namespace Damper.Infrastructure.QueueManagement
     {
         public string CorrelationId { get; set; } = string.Empty;
         public string CustomerId { get; set; } = string.Empty;
-        public WebhookEnvelope Payload { get; set; } = new();
+        public MessageEnvelope Payload { get; set; } = new();
         public CancellationToken CancelToken { get; set; }
         public bool ShouldThrow { get; set; }
 
-        public static PublishWrapper BuildFrom(string correlationId, string customerId, WebhookEnvelope payload, CancellationToken ct, bool shouldThrow = false)
+        public static PublishWrapper BuildFrom(string correlationId, string customerId, MessageEnvelope payload, CancellationToken ct, bool shouldThrow = false)
         {
             return new PublishWrapper
             {
@@ -44,7 +44,7 @@ namespace Damper.Infrastructure.QueueManagement
             return this;
         }
 
-        public PublishWrapper SetPayload(WebhookEnvelope toSet)
+        public PublishWrapper SetPayload(MessageEnvelope toSet)
         {
             Payload = toSet;
             return this;
@@ -75,7 +75,7 @@ namespace Damper.Infrastructure.QueueManagement
             return result;
         }
 
-        private string GetSeparator(StringBuilder sb)
+        private static string GetSeparator(StringBuilder sb)
         {
             return sb.Length > 0 ? " | " : "";
         }

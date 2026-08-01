@@ -1,6 +1,6 @@
 namespace Damper.Infrastructure.Repositories
 {
-    public interface ICustomerRepository
+    public interface IIntegrationRepository
     {
         Task<CustomerConfig?> GetByIdAsync(string customerId, CancellationToken ct);
     }

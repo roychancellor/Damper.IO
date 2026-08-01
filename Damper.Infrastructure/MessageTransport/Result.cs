@@ -1,4 +1,4 @@
-namespace Damper.Infrastructure.Models
+namespace Damper.Infrastructure.MessageTransport
 {
     public class Result<TValue>
     {

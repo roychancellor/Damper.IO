@@ -1,9 +1,9 @@
 ﻿using Microsoft.AspNetCore.Http;
-using Damper.Infrastructure.Models;
+using Damper.Infrastructure.MessageTransport;
 
 namespace Damper.Core.IngestionService;
 
-public interface IWebhookIngestionService
+public interface IMessageIngestionService
 {
     Task<Result<string>> ProcessIngressAsync(RequestWrapper requestWrapper);
 }

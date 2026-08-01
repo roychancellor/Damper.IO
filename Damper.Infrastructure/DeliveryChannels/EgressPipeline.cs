@@ -1,15 +1,15 @@
 using System.Threading.Channels;
-using Damper.Infrastructure.Models;
+using Damper.Infrastructure.MessageTransport;
 
 namespace Damper.Infrastructure.CustomerChannels
 {
-    public class CustomerEgressPipeline : IDisposable
+    public class EgressPipeline : IDisposable
     {
-        public ChannelWriter<WebhookEnvelope> Writer { get; }
+        public ChannelWriter<MessageEnvelope> Writer { get; }
         public Task BackgroundTask { get; }
         private readonly CancellationTokenSource _cts;
 
-        public CustomerEgressPipeline(ChannelWriter<WebhookEnvelope> writer, Task backgroundTask, CancellationTokenSource cts)
+        public EgressPipeline(ChannelWriter<MessageEnvelope> writer, Task backgroundTask, CancellationTokenSource cts)
         {
             Writer = writer;
             BackgroundTask = backgroundTask;

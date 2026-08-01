@@ -1,23 +1,22 @@
 using System.Collections.Concurrent;
-using System.Threading.Channels;
 using Damper.Infrastructure.ChannelRegistry;
 using Damper.Infrastructure.Logging;
-using Damper.Infrastructure.Models;
 using Damper.Infrastructure.Repositories;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Hosting;
 using Damper.Infrastructure.ReferenceData;
 using Microsoft.Extensions.Options;
+using Damper.Infrastructure.CustomerChannels;
 
-namespace Damper.Infrastructure.CustomerChannels
+namespace Damper.Infrastructure.DeliveryChannels
 {
-    public class CustomerChannelRegistry : IChannelRegistry
+    public class DeliveryChannelRegistry : IChannelRegistry
     {
         private static readonly ILogger _log = Loggers.Request;
         private static readonly ILogger _traceLog = Loggers.RequestTrace;
 
-        private readonly ConcurrentDictionary<string, CustomerEgressPipeline> _registry = new();
+        private readonly ConcurrentDictionary<string, EgressPipeline> _registry = new();
         
         // Tracks suspended customer IDs with O(1) thread-safe lookups
         private readonly ConcurrentDictionary<string, byte> _suspendedCustomers = new();
@@ -28,13 +27,13 @@ namespace Damper.Infrastructure.CustomerChannels
         private readonly SemaphoreSlim _initLock = new(1, 1);
         private readonly IOptionsMonitor<AppSettings> _optMon;
 
-        private static readonly CustomerEgressPipeline _suspendedPipeline = new(
+        private static readonly EgressPipeline _suspendedPipeline = new(
             new SuspendedChannelWriter(), 
             Task.CompletedTask, // Represents a "finished" healthy task
             CancellationTokenSource.CreateLinkedTokenSource(CancellationToken.None)
         );
 
-        public CustomerChannelRegistry(IEgressPipelineFactory egressPipelineFactory, 
+        public DeliveryChannelRegistry(IEgressPipelineFactory egressPipelineFactory, 
                                        IServiceScopeFactory scopeFactory, 
                                        IHostApplicationLifetime appLifetime,
                                        IOptionsMonitor<AppSettings> optMon)
@@ -45,7 +44,7 @@ namespace Damper.Infrastructure.CustomerChannels
             _optMon = optMon;
         }
 
-        public async Task<CustomerEgressPipeline> GetOrCreatePipelineAsync(string customerId)
+        public async Task<EgressPipeline> GetOrCreatePipelineAsync(string customerId)
         {
             // FAST FAIL IF CUSTOMER IS SUSPENDED
             if (_suspendedCustomers.ContainsKey(customerId))
@@ -117,7 +116,7 @@ namespace Damper.Infrastructure.CustomerChannels
         {
             using var scope = _scopeFactory.CreateScope();
             _traceLog.Trace($"Primary + secondary channel registry MISS - getting customer repository and retrieving customer config | CUST ID: {customerId}");
-            var repo = scope.ServiceProvider.GetRequiredService<ICustomerRepository>();
+            var repo = scope.ServiceProvider.GetRequiredService<IIntegrationRepository>();
             var currentConfig = await repo.GetByIdAsync(customerId, _ct);
             if (currentConfig == null)
             {

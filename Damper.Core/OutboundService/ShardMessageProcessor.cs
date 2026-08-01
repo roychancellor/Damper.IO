@@ -2,7 +2,7 @@ using System.Text;
 using System.Threading.Channels;
 using Damper.Infrastructure.ChannelRegistry;
 using Damper.Infrastructure.Logging;
-using Damper.Infrastructure.Models;
+using Damper.Infrastructure.MessageTransport;
 using Damper.Infrastructure.Observability;
 using Damper.Infrastructure.ReferenceData;
 using Microsoft.Extensions.Logging;
@@ -16,10 +16,10 @@ namespace Damper.Core.OutboundService
         private static readonly ILogger _log = Loggers.Request;
         private static readonly ILogger _traceLog = Loggers.RequestTrace;
         private readonly IChannelRegistry _channelRegistry;
-        private readonly ObjectPool<WebhookAckContext> _contextPool;
+        private readonly ObjectPool<MessageAckContext> _contextPool;
         private readonly IOptionsMonitor<AppSettings> _optMon;
 
-        public ShardMessageProcessor(IChannelRegistry channelRegistry, ObjectPool<WebhookAckContext> contextPool, IOptionsMonitor<AppSettings> optMon)
+        public ShardMessageProcessor(IChannelRegistry channelRegistry, ObjectPool<MessageAckContext> contextPool, IOptionsMonitor<AppSettings> optMon)
         {
             _channelRegistry = channelRegistry;
             _contextPool = contextPool;
@@ -28,8 +28,8 @@ namespace Damper.Core.OutboundService
 
         public async Task ProcessMessageAsync(BasicDeliverEventArgs eventArgs, IShardProcessingContext context)
         {
-            WebhookAckContext? ackContext = null;
-            WebhookEnvelope envelope = new();
+            MessageAckContext? ackContext = null;
+            MessageEnvelope envelope = new();
             try
             {
                 ArgumentNullException.ThrowIfNull(context, nameof(context));
@@ -64,7 +64,7 @@ namespace Damper.Core.OutboundService
                 ackContext.ShardIndex = context.ShardIndex;
                 ackContext.ShardContext = context;
 
-                envelope = new WebhookEnvelope
+                envelope = new MessageEnvelope
                 {
                     CorrelationId = correlationId,
                     CustomerId = customerId,

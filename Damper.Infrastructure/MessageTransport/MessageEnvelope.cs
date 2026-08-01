@@ -1,10 +1,9 @@
-using System.Net.Http.Headers;
 using Damper.Infrastructure.Repositories;
 using Microsoft.Extensions.ObjectPool;
 
-namespace Damper.Infrastructure.Models
+namespace Damper.Infrastructure.MessageTransport
 {
-    public class WebhookEnvelope
+    public class MessageEnvelope
     {
         public string CorrelationId { get; set; } = string.Empty;
         public string CustomerId { get; set; } = string.Empty;
@@ -16,11 +15,11 @@ namespace Damper.Infrastructure.Models
        
         // Uee a Webhook Ack Context that will come from an object pool to
         // eliminate the use of an anonymous "OnProcessingCompleteAsync" lambda
-        public WebhookAckContext? AckContext { get; set; }
+        public MessageAckContext? AckContext { get; set; }
 
-        public static WebhookEnvelope BuildBase(RequestWrapper rw)
+        public static MessageEnvelope BuildBase(RequestWrapper rw)
         {
-            var toReturn = new WebhookEnvelope
+            var toReturn = new MessageEnvelope
             {
               CorrelationId = rw.CorrelationId,
               CustomerId = rw.CustomerId,
@@ -30,19 +29,19 @@ namespace Damper.Infrastructure.Models
             return toReturn;
         }
 
-        public WebhookEnvelope SetDestination(string toSet)
+        public MessageEnvelope SetDestination(string toSet)
         {
             DestinationUrl = toSet;
             return this;
         }
 
-        public WebhookEnvelope SetPayload(ReadOnlyMemory<byte> toSet)
+        public MessageEnvelope SetPayload(ReadOnlyMemory<byte> toSet)
         {
             RawPayloadBytes = toSet;
             return this;
         }
 
-        public WebhookEnvelope SetHeaders(Dictionary<string, string> toSet)
+        public MessageEnvelope SetHeaders(Dictionary<string, string> toSet)
         {
             Headers = toSet;
             return this;
@@ -51,7 +50,7 @@ namespace Damper.Infrastructure.Models
 
     public static class WebhookEnvelopeExtensions
     {
-        public static async Task FinalizeAckAsync(this WebhookEnvelope envelope, ObjectPool<WebhookAckContext> contextPool)
+        public static async Task FinalizeAckAsync(this MessageEnvelope envelope, ObjectPool<MessageAckContext> contextPool)
         {
             if (envelope.AckContext != null)
             {
@@ -61,7 +60,7 @@ namespace Damper.Infrastructure.Models
             }
         }
 
-        public static async Task FinalizeRejectAsync(this WebhookEnvelope envelope, ObjectPool<WebhookAckContext> contextPool)
+        public static async Task FinalizeRejectAsync(this MessageEnvelope envelope, ObjectPool<MessageAckContext> contextPool)
         {
             if (envelope.AckContext != null)
             {
@@ -71,7 +70,7 @@ namespace Damper.Infrastructure.Models
             }
         }
 
-        public static async Task FinalizeParkAsync(this WebhookEnvelope envelope, ObjectPool<WebhookAckContext> contextPool)
+        public static async Task FinalizeParkAsync(this MessageEnvelope envelope, ObjectPool<MessageAckContext> contextPool)
         {
             if (envelope.AckContext != null)
             {
@@ -81,12 +80,12 @@ namespace Damper.Infrastructure.Models
             }
         }
 
-        public static bool HasAttemptsRemaining(this WebhookEnvelope envelope, int maxAttempts)
+        public static bool HasAttemptsRemaining(this MessageEnvelope envelope, int maxAttempts)
         {
             return envelope.AttemptCount <= maxAttempts;
         }
 
-        public static HttpRequestMessage BuildHttpRequest(this WebhookEnvelope envelope, CustomerConfig custConfig)
+        public static HttpRequestMessage BuildHttpRequest(this MessageEnvelope envelope, CustomerConfig custConfig)
         {
             var request = new HttpRequestMessage(HttpMethod.Post, custConfig.DestinationURL)
             {

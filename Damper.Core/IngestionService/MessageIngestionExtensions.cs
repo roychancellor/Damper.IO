@@ -2,11 +2,11 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Damper.Core.IngestionService
 {
-    public static class WebhookIngestionExtensions
+    public static class MessageIngestionExtensions
     {
         public static IServiceCollection AddWebhookIngestion(this IServiceCollection services)
         {
-            services.AddScoped<IWebhookIngestionService, WebhookIngestionService>();
+            services.AddScoped<IMessageIngestionService, MessageIngestionService>();
             return services;
         }
     }

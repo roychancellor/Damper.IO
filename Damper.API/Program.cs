@@ -6,7 +6,6 @@ using Damper.Infrastructure.Logging;
 using NLog.Web;
 using NLog;
 using Damper.Infrastructure.ReferenceData;
-using Damper.Infrastructure.Models;
 using Damper.Infrastructure.CustomerChannels;
 using Damper.Infrastructure.ChannelRegistry;
 using Damper.Core.OutboundService;
@@ -15,6 +14,8 @@ using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using RabbitMQ.Client;
 using Microsoft.Extensions.Options;
+using Damper.Infrastructure.MessageTransport;
+using Damper.Infrastructure.DeliveryChannels;
 
 var bootstrapLogger = LogManager.Setup().GetCurrentClassLogger();
 
@@ -43,9 +44,9 @@ try
                     .AddRabbitMqInfrastructure()
                     .AddQueuePublishing()
                     .AddWebhookIngestion();
-    builder.Services.AddSingleton<IChannelRegistry, CustomerChannelRegistry>();
+    builder.Services.AddSingleton<IChannelRegistry, DeliveryChannelRegistry>();
     builder.Services.AddSingleton<IShardMessageProcessor, ShardMessageProcessor>();
-    builder.Services.AddSingleton<IEgressPipelineFactory, CustomerEgressPipelineFactory>();
+    builder.Services.AddSingleton<IEgressPipelineFactory, EgressPipelineFactory>();
     for (int i = 0; i < appSettings.RabbitMqSettings.NumberOfShards; i++)
     {
         int shardIndex = i;
@@ -77,7 +78,7 @@ try
     builder.Services.AddSingleton(sp =>
     {
         var provider = sp.GetRequiredService<ObjectPoolProvider>();
-        return provider.Create<WebhookAckContext>();
+        return provider.Create<MessageAckContext>();
     });
 
     // Configure OpenTelemetry
@@ -120,7 +121,7 @@ try
     app.MapPost("v1/inbound/{customerId}", async (
         string customerId, 
         HttpContext context,
-        IWebhookIngestionService ingestionService,
+        IMessageIngestionService ingestionService,
         CancellationToken ct) =>
     {
         // Middleware creates the correlation ID and puts it in the HttpContext.Items dictionary

@@ -3,7 +3,7 @@ using Damper.Infrastructure.Logging;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Primitives;
 
-namespace Damper.Infrastructure.Models
+namespace Damper.Infrastructure.MessageTransport
 {
     public class RequestWrapper
     {

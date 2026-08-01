@@ -1,9 +1,9 @@
 using Damper.Infrastructure.Logging;
 using Microsoft.Extensions.Logging;
 
-namespace Damper.Infrastructure.Models
+namespace Damper.Infrastructure.MessageTransport
 {
-    public class WebhookAckContext
+    public class MessageAckContext
     {
         private static readonly ILogger _log = Loggers.Request;
 
@@ -36,7 +36,7 @@ namespace Damper.Infrastructure.Models
             }
         }
 
-        public async Task ParkForRetryAsync(WebhookEnvelope envelope) => await ExecuteSafeAsync(() =>
+        public async Task ParkForRetryAsync(MessageEnvelope envelope) => await ExecuteSafeAsync(() =>
             ShardContext!.ParkForRetryAsync(envelope, DeliveryTag));
     }
 }

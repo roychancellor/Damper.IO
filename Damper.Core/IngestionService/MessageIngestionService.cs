@@ -3,21 +3,21 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Hosting;
 using Damper.Infrastructure.QueueManagement;
 using Damper.Infrastructure.Logging;
-using Damper.Infrastructure.Models;
+using Damper.Infrastructure.MessageTransport;
 
 namespace Damper.Core.IngestionService;
 
-public class WebhookIngestionService : IWebhookIngestionService
+public class MessageIngestionService : IMessageIngestionService
 {
     private static readonly ILogger _log = Loggers.Request;
     private static readonly ILogger _traceLog = Loggers.RequestTrace;
 
     private readonly IHostApplicationLifetime _appLifetime;
     
-    private readonly ICustomerRepository _customerRepo;
+    private readonly IIntegrationRepository _customerRepo;
     private readonly IQueuePublisher _queuePublisher;
 
-    public WebhookIngestionService(ICustomerRepository tenantRepo, IQueuePublisher queuePublisher, IHostApplicationLifetime appLifetime)
+    public MessageIngestionService(IIntegrationRepository tenantRepo, IQueuePublisher queuePublisher, IHostApplicationLifetime appLifetime)
     {
         _customerRepo = tenantRepo;
         _queuePublisher = queuePublisher;
@@ -64,7 +64,7 @@ public class WebhookIngestionService : IWebhookIngestionService
         var httpHeaderDictionary = rw.HttpHeaders.ToDictionary(h => h.Key, h => h.Value.ToString());
 
         _traceLog.Trace($"Building Webhook Envelope");
-        var toPublishEnvelope = WebhookEnvelope
+        var toPublishEnvelope = MessageEnvelope
                                 .BuildBase(rw)
                                 .SetDestination(customerConfig.DestinationURL)
                                 .SetPayload(rawBodyBytes)

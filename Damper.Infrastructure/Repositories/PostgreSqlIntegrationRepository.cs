@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 
 namespace Damper.Infrastructure.Repositories
 {
-    public class PostgreSqlCustomerRepository : ICustomerRepository
+    public class PostgreSqlIntegrationRepository : IIntegrationRepository
     {
         public Task<CustomerConfig?> GetByIdAsync(string customerId, CancellationToken ct)
         {
