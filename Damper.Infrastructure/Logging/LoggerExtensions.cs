@@ -1,3 +1,4 @@
+using Damper.Infrastructure.ReferenceData;
 using Microsoft.Extensions.Logging;
 
 namespace Damper.Infrastructure.Logging;
@@ -28,5 +29,5 @@ public static class LoggerExtensions
         => logger.LogCritical(ex, message, args);
 
     public static IDisposable? BeginCorrelationScope(this ILogger logger, string correlationId)
-        => logger.BeginScope(new Dictionary<string, object> { ["CorrelationId"] = correlationId });
+        => logger.BeginScope(new Dictionary<string, object> { [DamperConstants.REQUEST_CORRELATION_ID] = correlationId });
 }

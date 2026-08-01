@@ -1,7 +1,10 @@
 namespace Damper.Infrastructure.ReferenceData
 {
-    public class DamperDefaults
+    public class DamperConstants
     {
+        public const string REQUEST_X_CORRELATION_ID = "X-Correlation-ID";
+        public const string REQUEST_CORRELATION_ID = "CorrelationId";
+
         public const string DAMPER_SERVICE_NAME = "Damper.OutboundService";
         public const string DAMPER_METER_NAME = "Damper.Core";
         public const string DAMPER_METER_OTLP_ENDPOINT = "http://localhost:4317";

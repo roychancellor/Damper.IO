@@ -11,7 +11,6 @@ namespace Damper.Infrastructure.ChannelRegistry
         Task AutoResumeAfterCooldownAsync(string customerId, TimeSpan cooldown);
         void ResumeCustomer(string customerId);
         bool IsSuspended(string customerId);
-        void EvictPipeline(string customerId);
         void ResetPipeline(string customerId);
     }
 }

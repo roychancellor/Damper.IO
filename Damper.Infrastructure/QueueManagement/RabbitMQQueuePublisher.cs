@@ -24,7 +24,7 @@ namespace Damper.Infrastructure.QueueManagement
             _appOptMon = appOptMon;
         }
 
-        public async Task<bool> PublishAsync(PublishWrapper pw)
+        public async Task<bool> TryPublishAsync(PublishWrapper pw)
         {
             try
             {
@@ -75,17 +75,17 @@ namespace Damper.Infrastructure.QueueManagement
                     MessageId = pw.CorrelationId,
                     Headers = new Dictionary<string, object?>
                     {
-                        { "x-damper-correlation-id", pw.CorrelationId },
-                        { "x-damper-customer-id", pw.CustomerId },
-                        { "x-damper-destination-url", pw.Payload.DestinationUrl },
-                        { "x-damper-attempt-count", pw.Payload.AttemptCount },
+                        { DamperConstants.X_DAMPER_CORRELATION_ID, pw.CorrelationId },
+                        { DamperConstants.X_DAMPER_CUSTOMER_ID, pw.CustomerId },
+                        { DamperConstants.X_DAMPER_DESTINATION_URL, pw.Payload.DestinationUrl },
+                        { DamperConstants.X_DAMPER_ATTEMPT_COUNT, pw.Payload.AttemptCount },
                     },
                     Timestamp = new AmqpTimestamp(DateTimeOffset.UtcNow.ToUnixTimeSeconds()),
                 };
                 _traceLog.Trace($"Mapping wekhook request headers to queue message headers for binary transport");
                 foreach (var header in pw.Payload.Headers)
                 {
-                    properties.Headers.Add($"h_{header.Key}", header.Value);
+                    properties.Headers.Add($"{DamperConstants.DAMPER_HEADER_PREFIX}{header.Key}", header.Value);
                 }
     
                 // Modern v7+ async publishing pattern
