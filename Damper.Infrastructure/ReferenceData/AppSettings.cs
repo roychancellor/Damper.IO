@@ -5,6 +5,9 @@ namespace Damper.Infrastructure.ReferenceData
     public class AppSettings
     {
         [Required]
+        public RepositorySettings RepositorySettings { get; set; } = new();
+        
+        [Required]
         public RabbitMQSettings RabbitMqSettings { get; set; } = new();
 
         [Required]

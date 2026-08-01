@@ -1,4 +1,6 @@
+using Damper.Infrastructure.ReferenceData;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Options;
 using System.Collections.Concurrent;
 namespace Damper.Infrastructure.Repositories;
 
@@ -6,13 +8,14 @@ public class CachedCustomerRepository : ICustomerRepository
 {
     private readonly ICustomerRepository _durableRepo;
     private readonly IMemoryCache _memoryCache;
-    private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(10);
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _locks = new();
+    private IOptionsMonitor<AppSettings> _optMon;
 
-    public CachedCustomerRepository(ICustomerRepository innerRepository, IMemoryCache memoryCache)
+    public CachedCustomerRepository(ICustomerRepository innerRepository, IMemoryCache memoryCache, IOptionsMonitor<AppSettings> optMon)
     {
         _durableRepo = innerRepository;
         _memoryCache = memoryCache;
+        _optMon = optMon;
     }
 
     public async Task<CustomerConfig?> GetByIdAsync(string customerId, CancellationToken ct)
@@ -28,7 +31,7 @@ public class CachedCustomerRepository : ICustomerRepository
 
         // Cache miss: Go fetch from the durable repository using single flight pattern
         var sem = _locks.GetOrAdd(cacheKey, _ => new SemaphoreSlim(1, 1));
-        await sem.WaitAsync();
+        await sem.WaitAsync(CancellationToken.None);
         try
         {
             // Try the cache again in case another thread put it in there - if it hits, get out of here!
@@ -42,7 +45,7 @@ public class CachedCustomerRepository : ICustomerRepository
             if (realConfig != null)
             {
                 // Add to cache with an absolute expiration window
-                _memoryCache.Set(cacheKey, realConfig, CacheDuration);
+                _memoryCache.Set(cacheKey, realConfig, GetCacheTimeToLive());
             }
             return realConfig;
         }
@@ -60,6 +63,11 @@ public class CachedCustomerRepository : ICustomerRepository
         }
     }
 
+    private TimeSpan GetCacheTimeToLive()
+    {
+        return TimeSpan.FromMinutes(_optMon.CurrentValue.RepositorySettings.CacheTimeToLiveMinutes);
+    }
+
     public void Invalidate(string customerId)
     {
         _memoryCache.Remove(CacheKey(customerId));
@@ -67,7 +75,7 @@ public class CachedCustomerRepository : ICustomerRepository
 
     public void Update(string customerId, CustomerConfig config)
     {
-        _memoryCache.Set(CacheKey(customerId), config, CacheDuration);
+        _memoryCache.Set(CacheKey(customerId), config, GetCacheTimeToLive());
     }
 
     private static string CacheKey(string customerId) => $"customer-{customerId}";
