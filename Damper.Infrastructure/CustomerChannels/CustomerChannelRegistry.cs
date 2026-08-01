@@ -7,6 +7,8 @@ using Damper.Infrastructure.Repositories;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Hosting;
+using Damper.Infrastructure.ReferenceData;
+using Microsoft.Extensions.Options;
 
 namespace Damper.Infrastructure.CustomerChannels
 {
@@ -24,6 +26,7 @@ namespace Damper.Infrastructure.CustomerChannels
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly IEgressPipelineFactory _pipelineFactory;
         private readonly SemaphoreSlim _initLock = new(1, 1);
+        private readonly IOptionsMonitor<AppSettings> _optMon;
 
         private static readonly CustomerEgressPipeline _suspendedPipeline = new(
             new SuspendedChannelWriter(), 
@@ -31,14 +34,15 @@ namespace Damper.Infrastructure.CustomerChannels
             CancellationTokenSource.CreateLinkedTokenSource(CancellationToken.None)
         );
 
-        public CustomerChannelRegistry(
-            IEgressPipelineFactory egressPipelineFactory, 
-            IServiceScopeFactory scopeFactory, 
-            IHostApplicationLifetime appLifetime)
+        public CustomerChannelRegistry(IEgressPipelineFactory egressPipelineFactory, 
+                                       IServiceScopeFactory scopeFactory, 
+                                       IHostApplicationLifetime appLifetime,
+                                       IOptionsMonitor<AppSettings> optMon)
         {
             _pipelineFactory = egressPipelineFactory;
             _scopeFactory = scopeFactory;
             _ct = appLifetime.ApplicationStopping;
+            _optMon = optMon;
         }
 
         public async Task<CustomerEgressPipeline> GetOrCreatePipelineAsync(string customerId)
@@ -167,9 +171,8 @@ namespace Damper.Infrastructure.CustomerChannels
 
                 // Kick off the asynchronous self-healing cooldown task
                 // We discard the Task return object ('_ =') because this is designed as fire-and-forget.
-                // TODO: Get the cooldown duration from the customer's config (e.g., currentConfig.CircuitBreakerCooldownSeconds).
                 _traceLog.Trace($"Starting cooldown period before attempting to resume the customer | CUST ID: {customerId}");
-                _ = AutoResumeAfterCooldownAsync(customerId, TimeSpan.FromSeconds(10)/*TimeSpan.FromMinutes(5)*/);
+                _ = AutoResumeAfterCooldownAsync(customerId, TimeSpan.FromSeconds(_optMon.CurrentValue.EgressSettings.CircuitBreakerCooldownSeconds));
             }
         }
 
@@ -209,9 +212,9 @@ namespace Damper.Infrastructure.CustomerChannels
             {
                 // CRITICAL: Ensure no remnants of the "Completed" channel remain 
                 // in the dictionary before allowing new ingestion.
-                if (_registry.TryRemove(customerId, out var oldPipeline))
+                if (_registry.TryRemove(customerId, out var _))
                 {
-                    _log.Info("Purging stale, completed pipeline during resume | CUST ID: {Id}", customerId);
+                    _log.Info("Purging stale, completed pipeline during customer resume | CUST ID: {Id}", customerId);
                 }
                 
                 _log.Info("Circuit Breaker Reset. Resuming ingestion paths for Customer | CUST ID: {Id}.", customerId);

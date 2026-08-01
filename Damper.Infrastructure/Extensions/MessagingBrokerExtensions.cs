@@ -14,8 +14,8 @@ namespace Damper.Infrastructure.Extensions
             {
                 // This lambda runs LAZILY when a service first requests IConnection.
                 // The container is fully built here, so we can safely resolve services.
-                var appOptMon = serviceProvider.GetRequiredService<IOptionsMonitor<AppRefData>>();
-                var rabbitRefData = appOptMon.CurrentValue.RabbitMqData;
+                var appOptMon = serviceProvider.GetRequiredService<IOptionsMonitor<AppSettings>>();
+                var rabbitRefData = appOptMon.CurrentValue.RabbitMqSettings;
 
                 var connectionFactory = new ConnectionFactory 
                 { 

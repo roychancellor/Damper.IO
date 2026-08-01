@@ -1,16 +1,14 @@
-using System.Text.Json;
-
-/***************************************************************************************************************************/
-// TODO: CONVERT ENTIRE DATA TRANSMISSION PATH TO RAW BYTES. REFER TO GEMINI: https://gemini.google.com/app/e3be0124a487526e
-/***************************************************************************************************************************/
+using System.Net.Http.Headers;
+using Damper.Infrastructure.Repositories;
+using Microsoft.Extensions.ObjectPool;
 
 namespace Damper.Infrastructure.Models
 {
     public class WebhookEnvelope
     {
-        public string CorrelationId { get; set; } = "";
-        public string CustomerId { get; set; } = "";
-        public string DestinationUrl { get; set; } = "";
+        public string CorrelationId { get; set; } = string.Empty;
+        public string CustomerId { get; set; } = string.Empty;
+        public string DestinationUrl { get; set; } = string.Empty;
         public ReadOnlyMemory<byte> RawPayloadBytes { get; set; }
         public Dictionary<string, string> Headers { get; set; } = [];
         public DateTime ReceivedAt { get; set; }
@@ -48,6 +46,53 @@ namespace Damper.Infrastructure.Models
         {
             Headers = toSet;
             return this;
+        }
+    }
+
+    public static class WebhookEnvelopeExtensions
+    {
+        public static async Task FinalizeAckAsync(this WebhookEnvelope envelope, ObjectPool<WebhookAckContext> contextPool)
+        {
+            if (envelope.AckContext != null)
+            {
+                await envelope.AckContext.AckAsync();
+                contextPool.Return(envelope.AckContext);
+                envelope.AckContext = null;
+            }
+        }
+
+        public static async Task FinalizeRejectAsync(this WebhookEnvelope envelope, ObjectPool<WebhookAckContext> contextPool)
+        {
+            if (envelope.AckContext != null)
+            {
+                await envelope.AckContext.RejectAsync(requeue: false);
+                contextPool.Return(envelope.AckContext);
+                envelope.AckContext = null;
+            }
+        }
+
+        public static async Task FinalizeParkAsync(this WebhookEnvelope envelope, ObjectPool<WebhookAckContext> contextPool)
+        {
+            if (envelope.AckContext != null)
+            {
+                await envelope.AckContext.ParkForRetryAsync(envelope);
+                contextPool.Return(envelope.AckContext);
+                envelope.AckContext = null;
+            }
+        }
+
+        public static bool HasAttemptsRemaining(this WebhookEnvelope envelope, int maxAttempts)
+        {
+            return envelope.AttemptCount <= maxAttempts;
+        }
+
+        public static HttpRequestMessage BuildHttpRequest(this WebhookEnvelope envelope, CustomerConfig custConfig)
+        {
+            var request = new HttpRequestMessage(HttpMethod.Post, custConfig.DestinationURL)
+            {
+                Content = new ReadOnlyMemoryContent(envelope.RawPayloadBytes)
+            };
+            return request;
         }
     }
 }

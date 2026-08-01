@@ -1,10 +1,12 @@
 using System.Threading.Channels;
 using Damper.Infrastructure.Logging;
 using Damper.Infrastructure.Models;
+using Damper.Infrastructure.ReferenceData;
 using Damper.Infrastructure.Repositories;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.ObjectPool;
+using Microsoft.Extensions.Options;
 
 namespace Damper.Infrastructure.CustomerChannels
 {
@@ -14,18 +16,24 @@ namespace Damper.Infrastructure.CustomerChannels
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly ObjectPool<WebhookAckContext> _contextPool;
+        private readonly IOptionsMonitor<AppSettings> _optMon;
 
-        public CustomerEgressPipelineFactory(IHttpClientFactory httpClientFactory, IServiceScopeFactory scopeFactory, ObjectPool<WebhookAckContext> contextPool)
+        public CustomerEgressPipelineFactory(IHttpClientFactory httpClientFactory,
+                                             IServiceScopeFactory scopeFactory,
+                                             ObjectPool<WebhookAckContext> contextPool,
+                                             IOptionsMonitor<AppSettings> optMon)
         {
             _httpClientFactory = httpClientFactory;
             _scopeFactory = scopeFactory;
             _contextPool = contextPool;
+            _optMon = optMon;
         }
 
         public CustomerEgressPipeline CreatePipeline(CustomerConfig customerConfig, Action<string> onSuspensionTriggered, CancellationToken ct)
         {
-            // TODO: Get default max queue capacity from config
-            var bufferSize = customerConfig.MaxQueueCapacity > 0 ? customerConfig.MaxQueueCapacity : 5000;
+            var bufferSize = customerConfig.MaxQueueCapacity > 0
+                           ? customerConfig.MaxQueueCapacity
+                           : _optMon.CurrentValue.RabbitMqSettings.DefaultMaxQueueCapacity;
             
             var channelOptions = new BoundedChannelOptions(bufferSize)
             {
@@ -42,7 +50,8 @@ namespace Damper.Infrastructure.CustomerChannels
             {
                 try
                 {
-                    var dispatcher = new ChannelDispatcher(_httpClientFactory,
+                    var dispatcher = new ChannelDispatcher(_optMon,
+                                                           _httpClientFactory,
                                                            onSuspensionTriggered,
                                                            customerConfig,
                                                            channel.Reader,

@@ -4,8 +4,10 @@ using Damper.Infrastructure.ChannelRegistry;
 using Damper.Infrastructure.Logging;
 using Damper.Infrastructure.Models;
 using Damper.Infrastructure.Observability;
+using Damper.Infrastructure.ReferenceData;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.ObjectPool;
+using Microsoft.Extensions.Options;
 using RabbitMQ.Client.Events;
 namespace Damper.Core.OutboundService
 {
@@ -15,11 +17,13 @@ namespace Damper.Core.OutboundService
         private static readonly ILogger _traceLog = Loggers.RequestTrace;
         private readonly IChannelRegistry _channelRegistry;
         private readonly ObjectPool<WebhookAckContext> _contextPool;
+        private readonly IOptionsMonitor<AppSettings> _optMon;
 
-        public ShardMessageProcessor(IChannelRegistry channelRegistry, ObjectPool<WebhookAckContext> contextPool)
+        public ShardMessageProcessor(IChannelRegistry channelRegistry, ObjectPool<WebhookAckContext> contextPool, IOptionsMonitor<AppSettings> optMon)
         {
             _channelRegistry = channelRegistry;
             _contextPool = contextPool;
+            _optMon = optMon;
         }
 
         public async Task ProcessMessageAsync(BasicDeliverEventArgs ea, IShardProcessingContext context)
@@ -46,14 +50,14 @@ namespace Damper.Core.OutboundService
                         : string.Empty;
                 }
 
-                var customerId = GetStringHeader("x-damper-customer-id");
-                var destinationUrl = GetStringHeader("x-damper-destination-url");
-                var correlationId = GetStringHeader("x-damper-correlation-id");
+                var customerId = GetStringHeader(DamperDefaults.X_DAMPER_CUSTOMER_ID);
+                var destinationUrl = GetStringHeader(DamperDefaults.X_DAMPER_DESTINATION_URL);
+                var correlationId = GetStringHeader(DamperDefaults.X_DAMPER_CORRELATION_ID);
                 
                 // Allow NLog to automatically populate the Correlation Id in every log statement in this method beyond this point
                 using var correlationScope = _log.BeginCorrelationScope(correlationId);
                 
-                int attemptCount = amqpHeaders.TryGetValue("x-damper-attempt-count", out var attemptObj)
+                int attemptCount = amqpHeaders.TryGetValue(DamperDefaults.X_DAMPER_ATTEMPT_COUNT, out var attemptObj)
                     ? Convert.ToInt32(attemptObj)
                     : 1;
 
@@ -63,7 +67,7 @@ namespace Damper.Core.OutboundService
                 string headerValueString = string.Empty;
                 foreach (var (key, value) in amqpHeaders)
                 {
-                    if (key.StartsWith("h_") && value is byte[] headerValueBytes)
+                    if (key.StartsWith(DamperDefaults.DAMPER_HEADER_PREFIX) && value is byte[] headerValueBytes)
                     {
                         headerValueString = Encoding.UTF8.GetString(headerValueBytes);
                         envelopeHeaders[key[2..]] = headerValueString;
@@ -96,7 +100,8 @@ namespace Damper.Core.OutboundService
                 _traceLog.Trace($"Attempting non-blocking write to customer channel | CUST ID: {envelope.CustomerId} | DEL TAG: {ea.DeliveryTag}");
 
                 // TODO: Get the wait to write token expiration time from appsettings
-                var canWrite = await pipeline.Writer.WaitToWriteAsync(new CancellationTokenSource(1000).Token);
+                var canWrite = await pipeline.Writer.WaitToWriteAsync(
+                                new CancellationTokenSource(_optMon.CurrentValue.ProcessorSettings.WaitToWriteExpirationMillis).Token);
                 if (canWrite && !pipeline.BackgroundTask.IsCompleted && pipeline.Writer.TryWrite(envelope))
                 {
                     // DO NOT ACK HERE!!! LET THE CHANNEL DISPATCHER HANDLE THE ACK WHEN IT KNOWS THE OUTCOME
