@@ -65,7 +65,7 @@ namespace Damper.Core.OutboundService
             var processingContext = new RuntimeProcessingContext(_shardIndex, _channel, _optMon, stoppingToken);
 
             var consumer = new AsyncEventingBasicConsumer(_channel);
-            consumer.ReceivedAsync += (sender, ea) => _messageProcessor.ProcessMessageAsync(ea, processingContext);
+            consumer.ReceivedAsync += (sender, eventArgs) => _messageProcessor.ProcessMessageAsync(eventArgs, processingContext);
 
             await _channel.BasicConsumeAsync(queueName, autoAck: false, consumer, stoppingToken);
             _appLog.Info("Shard consumer thread bound to queue | SHARD {Index:D2} --> QUEUE {QueueName}", _shardIndex, queueName);
@@ -100,8 +100,8 @@ namespace Damper.Core.OutboundService
                 }
                 else
                 {
-                    _reqLog.Error($"CANNOT NACK: CHANNEL IS CLOSED!!!");
-                    throw new InvalidOperationException("Cannot Nack: Channel is closed.");
+                    _reqLog.Error($"CANNOT REJECT: CHANNEL IS CLOSED!!!");
+                    throw new InvalidOperationException("Cannot Reject: Channel is closed.");
                 }
             }
             public async Task NackAsync(ulong deliveryTag, bool multiple, bool requeue) => await _channel.BasicNackAsync(deliveryTag, multiple, requeue);
@@ -109,14 +109,14 @@ namespace Damper.Core.OutboundService
             {
                 var headers = new Dictionary<string, object?>
                 {
-                    { DamperDefaults.X_DAMPER_CUSTOMER_ID, envelope.CustomerId },
-                    { DamperDefaults.X_DAMPER_DESTINATION_URL, envelope.DestinationUrl },
-                    { DamperDefaults.X_DAMPER_CORRELATION_ID, envelope.CorrelationId },
-                    { DamperDefaults.X_DAMPER_ATTEMPT_COUNT, 1 } // We want this to come back fresh and ready to retry sending
+                    { DamperConstants.X_DAMPER_CUSTOMER_ID, envelope.CustomerId },
+                    { DamperConstants.X_DAMPER_DESTINATION_URL, envelope.DestinationUrl },
+                    { DamperConstants.X_DAMPER_CORRELATION_ID, envelope.CorrelationId },
+                    { DamperConstants.X_DAMPER_ATTEMPT_COUNT, 1 } // We want this to come back fresh and ready to retry sending
                 };
                 foreach (var (key, value) in envelope.Headers)
                 {
-                    headers[$"h_{key}"] = value;
+                    headers[$"{DamperConstants.DAMPER_HEADER_PREFIX}{key}"] = value;
                 }
 
                 int ttlMs = GetTTLMillis();
@@ -147,9 +147,13 @@ namespace Damper.Core.OutboundService
             }
         }
 
+        // Part of the .NET BackgroundTask infrastructure
         public override async Task StopAsync(CancellationToken cancellationToken)
         {
-            if (_channel is not null) { await _channel.CloseAsync(cancellationToken); }
+            if (_channel is not null)
+            {
+                await _channel.CloseAsync(cancellationToken);
+            }
             await base.StopAsync(cancellationToken);
         }
     }

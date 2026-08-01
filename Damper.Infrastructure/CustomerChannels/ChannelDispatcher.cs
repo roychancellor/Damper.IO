@@ -198,7 +198,7 @@ namespace Damper.Infrastructure.CustomerChannels
                         if (response.IsSuccessStatusCode)
                         {
                             _log.Info($"Response IS successful | CUST ID: {envelope.CustomerId} | HTTP STATUS: {response.StatusCode}");
-                            DamperMetrics.DeliverySuccessCounter.Add(1, new KeyValuePair<string, object?>(DamperDefaults.DAMPER_METER_CUSTOMER_ID, envelope.CustomerId));
+                            DamperMetrics.DeliverySuccessCounter.Add(1, new KeyValuePair<string, object?>(DamperConstants.DAMPER_METER_CUSTOMER_ID, envelope.CustomerId));
                             await envelope.FinalizeAckAsync(_contextPool);
                             return SUCCESS;
                         }
@@ -306,8 +306,8 @@ namespace Damper.Infrastructure.CustomerChannels
 
         public static void AddDamperHeaders(this HttpRequestMessage httpRequest, WebhookEnvelope envelope)
         {
-            httpRequest.Headers.Add(DamperDefaults.REQUEST_X_DAMPER_CUSTOMER_ID, envelope.CorrelationId);
-            httpRequest.Headers.Add(DamperDefaults.REQUEST_X_DAMPER_DELIVERY_ATTEMPT, envelope.AttemptCount.ToString());
+            httpRequest.Headers.Add(DamperConstants.REQUEST_X_DAMPER_CUSTOMER_ID, envelope.CorrelationId);
+            httpRequest.Headers.Add(DamperConstants.REQUEST_X_DAMPER_DELIVERY_ATTEMPT, envelope.AttemptCount.ToString());
         }
 
         public static CancellationTokenSource SetRequestTimeout(this CancellationTokenSource cts, int timeoutMillis)

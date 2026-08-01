@@ -95,7 +95,7 @@ try
             metrics.AddOtlpExporter(options =>
             {
                 // Set your collector endpoint (default is usually http://localhost:4317)
-                options.Endpoint = new Uri(appSettings.MetricsSettings.OtlpEndpoint ?? DamperDefaults.DAMPER_METER_OTLP_ENDPOINT);
+                options.Endpoint = new Uri(appSettings.MetricsSettings.OtlpEndpoint ?? DamperConstants.DAMPER_METER_OTLP_ENDPOINT);
                 
                 // If using HTTP instead of gRPC, set this:
                 // options.Protocol = OpenTelemetry.Exporter.OtlpExportProtocol.HttpProtobuf;
