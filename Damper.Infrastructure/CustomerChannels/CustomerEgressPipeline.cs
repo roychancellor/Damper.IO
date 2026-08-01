@@ -18,14 +18,14 @@ namespace Damper.Infrastructure.CustomerChannels
 
         public void Dispose()
         {
-            // 1. Signal the writer that no more items are coming
+            // Signal the writer that no more items are coming
             try { Writer.TryComplete(); } catch { }
 
-            // 2. Cancel the background loop
+            // Cancel the background loop
             _cts.Cancel();
             _cts.Dispose();
 
-            // 3. Optional: If you need to ensure it's gone, you could await BackgroundTask.
+            // Optional: To REALLYo ensure it's gone, await BackgroundTask.
             // But since Dispose() must be synchronous, we let it terminate in the background.
         }
     }
