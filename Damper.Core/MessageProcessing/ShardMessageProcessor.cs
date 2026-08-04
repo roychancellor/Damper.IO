@@ -74,7 +74,6 @@ namespace Damper.Core.MessageProcessing
                 envelope = new MessageEnvelope
                 {
                     CorrelationId = correlationId,
-                    ApiKey = apiKey,
                     IntegrationId = integId,
                     IntegrationName = integName,
                     DestinationUrl = destinationUrl,

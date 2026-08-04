@@ -16,7 +16,7 @@ namespace Damper.Infrastructure.Repositories
             throw new NotImplementedException();
         }
 
-        public Task<Integration?> GetByApiKeyAsync(ApiKey apiKey, CancellationToken cancellationToken = default)
+        public Task<Integration?> GetByApiKeyHashAsync(ApiKeyHash apiKeyHash, CancellationToken cancellationToken = default)
         {
             throw new NotImplementedException();
         }

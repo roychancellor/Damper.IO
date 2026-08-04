@@ -4,6 +4,8 @@ using Microsoft.Extensions.Hosting;
 using Damper.Infrastructure.QueueManagement;
 using Damper.Infrastructure.Logging;
 using Damper.Infrastructure.MessageTransport;
+using Damper.Domain.Common;
+using Damper.Infrastructure.Security;
 
 namespace Damper.Core.IngestionService;
 
@@ -34,15 +36,15 @@ public class MessageIngestionService : IMessageIngestionService
             _log.Error(msg);
             return Result<string>.Failure(ErrorType.ServerError, msg);
         }
-        var apiKey = rw.ApiKey;
+        var apiKeyHash = rw.ApiKeyHash;
         var corrId = rw.CorrelationId;
 
         _log.Info($"====> New message request received | CORRELATION ID: {corrId}");
         _traceLog.Trace($"Getting integration from repo by API KEY (REDACTED)");
-        var integration = await _integRepo.GetByApiKeyAsync(apiKey, rw.CancelToken);
+        var integration = await _integRepo.GetByApiKeyHashAsync(apiKeyHash, rw.CancelToken);
         if (integration == null)
         {
-            return rw.SetError($"ApiKey not found - treat as unauthorized", ErrorType.Unauthorized).LogAndGenerateFailureResult();
+            return rw.SetError($"ApiKey not found - treat as unauthorized | API KEY (MASKED): {rw.ApiKeyMasked}", ErrorType.Unauthorized).LogAndGenerateFailureResult();
         }
         _traceLog.Trace($"Integration retrieved | INTEG ID: {integration.Id} | NAME: {integration.Name}");
 
@@ -75,7 +77,7 @@ public class MessageIngestionService : IMessageIngestionService
         // payload byte-for-byte.
         _traceLog.Trace($"Building Message Envelope");
         var toPublishEnvelope = MessageEnvelope
-                                .BuildBase(rw, linkedCts.Token, shouldThrow: true)
+                                .BuildBase(rw, shouldThrow: true, linkedCts.Token)
                                 .SetDestination(integration.Delivery.Destination.Uri.OriginalString)
                                 .SetPayload(rawBodyBytes)
                                 .SetHeaders(httpHeaderDictionary)

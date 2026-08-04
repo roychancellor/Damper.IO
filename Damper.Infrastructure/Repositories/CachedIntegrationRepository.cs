@@ -83,9 +83,9 @@ public class CachedIntegrationRepository : IIntegrationRepository
     private static string CacheKey(string apiKey) => $"apikey-{apiKey}";
 
     // TODO: Implement the repository methods
-    public async Task<Integration?> GetByApiKeyAsync(ApiKey apiKey, CancellationToken ct = default)
+    public async Task<Integration?> GetByApiKeyHashAsync(ApiKeyHash apiKeyHash, CancellationToken ct = default)
     {
-        string cacheKey = CacheKey(apiKey.Reveal());
+        string cacheKey = CacheKey(apiKeyHash.ToString());
 
         // Look for the integration in cache first - if it's there, get out of here!
         if (_memoryCache.TryGetValue(cacheKey, out Integration? cachedInteg))
@@ -104,7 +104,7 @@ public class CachedIntegrationRepository : IIntegrationRepository
                 return cachedInteg;
             }
             
-            var realConfig = await _durableRepo.GetByApiKeyAsync(apiKey, ct)
+            var realConfig = await _durableRepo.GetByApiKeyHashAsync(apiKeyHash, ct)
                                                .ConfigureAwait(continueOnCapturedContext: false);
             if (realConfig != null)
             {

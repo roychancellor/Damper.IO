@@ -1,5 +1,6 @@
 using Damper.Domain.Common;
 using Damper.Domain.Integrations;
+using Damper.Infrastructure.Security;
 
 namespace Damper.Infrastructure.Repositories;
 
@@ -27,10 +28,10 @@ public class FileSystemIntegrationRepository : IIntegrationRepository
         throw new NotImplementedException();
     }
 
-    public async Task<Integration?> GetByApiKeyAsync(ApiKey apiKey, CancellationToken cancellationToken = default)
+    public async Task<Integration?> GetByApiKeyHashAsync(ApiKeyHash apiKeyHash, CancellationToken cancellationToken = default)
     {
         // TODO: Actually go get the repository objects from file system
-        var toReturn = _integrations.FirstOrDefault(i => i.Ingress.ApiKey == apiKey);
+        var toReturn = _integrations.FirstOrDefault(i => i.Ingress.ApiKeyHash.Equals(apiKeyHash));
         return await Task.FromResult(toReturn);
     }
 
@@ -58,7 +59,7 @@ public class FileSystemIntegrationRepository : IIntegrationRepository
             ModifiedUtc = DateTime.UtcNow,
             Ingress = new Ingress
             {
-                ApiKey = new(apiKey),
+                ApiKeyHash = new ApiKeyHash(new ApiKey(apiKey).ToHash()),
                 Enabled = true,
             },
             Delivery = new Delivery

@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using Damper.Domain.Common;
 using Damper.Infrastructure.Logging;
+using Damper.Infrastructure.Security;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Primitives;
 
@@ -8,7 +9,9 @@ namespace Damper.Infrastructure.MessageTransport
 {
     public class RequestWrapper
     {
-        public ApiKey ApiKey { get; set; }
+        private ApiKey _apiKey;
+        public string ApiKeyMasked => _apiKey.Masked;
+        public ApiKeyHash ApiKeyHash { get; set; }
         public CorrelationId CorrelationId{ get; set; } = new(string.Empty);
         public IHeaderDictionary HttpHeaders{ get; set; } = new HeaderDictionary();
         public Stream RequestBody{ get; set; } = new MemoryStream();
@@ -16,11 +19,12 @@ namespace Damper.Infrastructure.MessageTransport
         public ErrorType ErrorType { get; set; }
         public string ErrorMessage { get; set; } = string.Empty;
 
-        public static RequestWrapper BuildFrom(CorrelationId correlationId, string apiKey, IHeaderDictionary headers, Stream body, CancellationToken ct)
+        public static RequestWrapper BuildFrom(CorrelationId correlationId, ApiKey apiKey, IHeaderDictionary headers, Stream body, CancellationToken ct)
         {
             return new RequestWrapper
             {
-                ApiKey = new(apiKey),
+                _apiKey = apiKey,
+                ApiKeyHash = new(apiKey.ToHash()),
                 CorrelationId = correlationId,
                 HttpHeaders = headers,
                 RequestBody = body,
@@ -39,6 +43,7 @@ namespace Damper.Infrastructure.MessageTransport
         {
             return !(
                         string.IsNullOrWhiteSpace(CorrelationId.Value) ||
+                        string.IsNullOrWhiteSpace(ApiKeyHash.ToString()) ||
                         HttpHeaders == null ||
                         HttpHeaders.Count == 0 ||
                         RequestBody == null

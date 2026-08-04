@@ -7,7 +7,7 @@ namespace Damper.Infrastructure.Repositories
     {
         Task<Integration?> GetByIdAsync(long integrationId, CancellationToken cancellationToken = default);
 
-        Task<Integration?> GetByApiKeyAsync(ApiKey apiKey, CancellationToken cancellationToken = default);
+        Task<Integration?> GetByApiKeyHashAsync(ApiKeyHash apiKeyHash, CancellationToken cancellationToken = default);
 
         Task<IReadOnlyCollection<Integration>> GetAllAsync(CancellationToken cancellationToken = default);
 

@@ -6,6 +6,6 @@ namespace Damper.Domain.Integrations
     {
         public bool Enabled { get; init; } = true;
 
-        public ApiKey ApiKey { get; init; } = new();
+        public ApiKeyHash ApiKeyHash { get; init; } = new();
     }
 }

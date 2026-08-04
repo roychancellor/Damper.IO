@@ -8,7 +8,6 @@ namespace Damper.Infrastructure.MessageTransport
     public class MessageEnvelope
     {
         public CorrelationId CorrelationId { get; set; } = new(string.Empty);
-        public ApiKey ApiKey { get; set; }
         public long IntegrationId { get; set; }
         public IntegrationName IntegrationName { get; set; } = new(string.Empty);
         public string DestinationUrl { get; set; } = string.Empty;
@@ -23,13 +22,12 @@ namespace Damper.Infrastructure.MessageTransport
         // eliminate the use of an anonymous "OnProcessingCompleteAsync" lambda
         public MessageAckContext? AckContext { get; set; }
 
-        public static MessageEnvelope BuildBase(RequestWrapper rw, CancellationToken token, bool shouldThrow)
+        public static MessageEnvelope BuildBase(RequestWrapper rw, bool shouldThrow, CancellationToken token)
         {
             var toReturn = new MessageEnvelope
             {
               CancelToken = token,
               ShouldThrow = shouldThrow,
-              ApiKey = rw.ApiKey,
               CorrelationId = rw.CorrelationId,
               ReceivedAt = DateTime.UtcNow,
               AttemptCount = 1,  
