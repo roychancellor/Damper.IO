@@ -28,6 +28,7 @@ namespace Damper.Infrastructure.MessageTransport
         BadRequest = 1,
         NotFound = 2,
         Conflict = 3,
-        ServerError = 4
+        ServerError = 4,
+        Unauthorized = 5,
     }
 }

@@ -2,6 +2,8 @@ namespace Damper.Domain.Common
 {
     public readonly record struct ApiKey(string Value)
     {
-        public override string ToString() => Value;
+        public override string ToString() => Masked;
+
+        public string Masked => $"****{Value[^4..]}";
     }
 }

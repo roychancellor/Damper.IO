@@ -135,6 +135,8 @@ try
                 ErrorType.NotFound    => Results.NotFound(new { error = result.Error.Message }),
                 ErrorType.ServerError => TypedResults.Json(new { error = "An internal processing error occurred." }, 
                                                            statusCode: StatusCodes.Status500InternalServerError),
+                ErrorType.Unauthorized => TypedResults.Json(new { error = "Unable to authenticate." }, 
+                                                            statusCode: StatusCodes.Status401Unauthorized),
                 _                     => TypedResults.Json(new { error = "Unknown error occurred" },
                                                            statusCode: StatusCodes.Status500InternalServerError)
             };

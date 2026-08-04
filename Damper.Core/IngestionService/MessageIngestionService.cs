@@ -42,7 +42,7 @@ public class MessageIngestionService : IMessageIngestionService
         var integration = await _integRepo.GetByApiKeyAsync(apiKey, rw.CancelToken);
         if (integration == null)
         {
-            return rw.SetError($"Integration is missing or repository is corrupted", ErrorType.ServerError).LogAndGenerateFailureResult();
+            return rw.SetError($"ApiKey not found - treat as unauthorized", ErrorType.Unauthorized).LogAndGenerateFailureResult();
         }
         _traceLog.Trace($"Integration retrieved | INTEG ID: {integration.Id} | NAME: {integration.Name}");
 
@@ -80,7 +80,7 @@ public class MessageIngestionService : IMessageIngestionService
                                 .SetPayload(rawBodyBytes)
                                 .SetHeaders(httpHeaderDictionary)
                                 .SetIntegrationId(integration.Id)
-                                .SetIntegrationName(integration.Name);
+                                .SetIntegrationName(integration.Name.Value);
         if (toPublishEnvelope == null || toPublishEnvelope.RawPayloadBytes.IsEmpty)
         {
             return rw.SetError("Message Envelope to publish is null or empty of content", ErrorType.BadRequest).LogAndGenerateFailureResult();

@@ -30,7 +30,7 @@ public class FileSystemIntegrationRepository : IIntegrationRepository
     public async Task<Integration?> GetByApiKeyAsync(ApiKey apiKey, CancellationToken cancellationToken = default)
     {
         // TODO: Actually go get config from file system
-        var toReturn = _integrations.FirstOrDefault(i => i.Ingress.Authentication.ApiKey.Value.Equals(apiKey.Value, StringComparison.OrdinalIgnoreCase));
+        var toReturn = _integrations.FirstOrDefault(i => i.Ingress.ApiKey.Value.Equals(apiKey.Value, StringComparison.OrdinalIgnoreCase));
         return await Task.FromResult(toReturn);
     }
 
@@ -51,14 +51,14 @@ public class FileSystemIntegrationRepository : IIntegrationRepository
         return new Integration
         { 
             Id = id,
-            Name = $"{apiKey} Integration",
+            Name = new($"{apiKey} Integration"),
             Description = $"Testing {apiKey} destinations",
             Enabled = true,
             CreatedUtc = DateTime.UtcNow,
             ModifiedUtc = DateTime.UtcNow,
             Ingress = new Ingress
             {
-                Authentication = new IngressAuthentication { ApiKey = new(apiKey) },
+                ApiKey = new(apiKey),
                 Enabled = true,
             },
             Delivery = new Delivery

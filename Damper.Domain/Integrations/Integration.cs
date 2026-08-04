@@ -1,3 +1,5 @@
+using Damper.Domain.Common;
+
 namespace Damper.Domain.Integrations
 {
     /*
@@ -9,10 +11,10 @@ namespace Damper.Domain.Integrations
     |       Enabled
     |
     |-- "How do requests enter?"
-    |       IngressEndpoint
+    |       Ingress
     |
     |-- "How do requests leave?"
-            MessageRoute
+            DElivery
     */
     /*
     FUTURE ADMIN API:
@@ -25,7 +27,7 @@ namespace Damper.Domain.Integrations
     {
         public long Id { get; init; }
 
-        public string Name { get; init; } = string.Empty;
+        public IntegrationName Name { get; init; } = new(string.Empty);
 
         public string? Description { get; init; }
 
