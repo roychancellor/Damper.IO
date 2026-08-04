@@ -6,8 +6,6 @@ using Damper.Infrastructure.Logging;
 using NLog.Web;
 using NLog;
 using Damper.Infrastructure.ReferenceData;
-using Damper.Infrastructure.CustomerChannels;
-using Damper.Infrastructure.ChannelRegistry;
 using Microsoft.Extensions.ObjectPool;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
@@ -43,7 +41,7 @@ try
     builder.Services.AddRepositories()
                     .AddRabbitMqInfrastructure()
                     .AddQueuePublishing()
-                    .AddWebhookIngestion();
+                    .AddMessageIngestion();
     builder.Services.AddSingleton<IChannelRegistry, DeliveryChannelRegistry>();
     builder.Services.AddSingleton<IShardMessageProcessor, ShardMessageProcessor>();
     builder.Services.AddSingleton<IEgressPipelineFactory, EgressPipelineFactory>();
@@ -67,13 +65,13 @@ try
                         PooledConnectionIdleTimeout = TimeSpan.FromSeconds(egressData.PooledConnectionIdleTimeoutSeconds),
                         
                         // Performance tuning for massive multi-tenant throughput
-                        MaxConnectionsPerServer = egressData.MaxConnectionsPerServer, // Limits connections to any *single* customer domain
+                        MaxConnectionsPerServer = egressData.MaxConnectionsPerServer, // Limits connections to any *single* integration domain
                         EnableMultipleHttp2Connections = egressData.EnableMultipleHttp2Connections // Enhances HTTP/2 streaming multiplexing efficiency
                     })
                     .SetHandlerLifetime(TimeSpan.FromSeconds(egressData.HandlerLifetimeSeconds)); // Syncs factory management duration
     
     // Register the default object pool provider for making a pool of WebAckContext objects
-    // Use a pooled policy for the WebhookAckContext type
+    // Use a pooled policy for the MessageAckContext type
     builder.Services.AddSingleton<ObjectPoolProvider, DefaultObjectPoolProvider>();
     builder.Services.AddSingleton(sp =>
     {

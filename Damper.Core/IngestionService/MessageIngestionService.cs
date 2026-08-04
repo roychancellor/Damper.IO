@@ -30,14 +30,14 @@ public class MessageIngestionService : IMessageIngestionService
 
         if (rw == null || !rw.IsProcessable())
         {
-            var msg = $"The incoming webhook request is null or unprocessable";
+            var msg = $"The incoming message request is null or unprocessable";
             _log.Error(msg);
             return Result<string>.Failure(ErrorType.ServerError, msg);
         }
         var apiKey = rw.ApiKey;
         var corrId = rw.CorrelationId;
 
-        _log.Info($"====> New webhook request received | CORRELATION ID: {corrId}");
+        _log.Info($"====> New message request received | CORRELATION ID: {corrId}");
         _traceLog.Trace($"Getting integration from repo by API KEY (REDACTED)");
         var integration = await _integRepo.GetByApiKeyAsync(apiKey, rw.CancelToken);
         if (integration == null)
@@ -47,25 +47,25 @@ public class MessageIngestionService : IMessageIngestionService
         _traceLog.Trace($"Integration retrieved | INTEG ID: {integration.Id} | NAME: {integration.Name}");
 
         // Verify the Content-Type header is parsable as a known type, as the dispatcher needs it to be correct
-        // to send a valid request to the customer. Checking here allows for HTTP 400 if it is not parsable.
+        // to send a valid request to the destination. Checking here allows for HTTP 400 if it is not parsable.
         if (!rw.TryValidateContentType(out Result<string> badRequestResult))
         {
             return badRequestResult;
         }
         
-        // Preserve the webhook payload byte-for-byte (payload agnostic)
+        // Preserve the message payload byte-for-byte (payload agnostic)
         _traceLog.Trace($"Reading request body to bytes");
         var rawBodyBytes = await rw.ReadRequestBodyToMemoryAsync();
         if (rawBodyBytes.IsEmpty)
         {
-            return rw.SetError("The incoming webhook payload cannot be null or empty", ErrorType.BadRequest).LogAndGenerateFailureResult();
+            return rw.SetError("The incoming message payload cannot be null or empty", ErrorType.BadRequest).LogAndGenerateFailureResult();
         }
         _traceLog.Trace($"Read request body successfully | NUM BYTES: {rawBodyBytes.Length}");
 
         var httpHeaderDictionary = rw.HttpHeaders.ToDictionary(h => h.Key, h => h.Value.ToString());
 
         // By business decision, we are passing a combined token that will prevent publishing if the ingress HTTP request
-        // is canceled OR if the application shuts down. In either case, the webhook providers will not receive
+        // is canceled OR if the application shuts down. In either case, the message providers will not receive
         // a success status code and will retry.
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(rw.CancelToken, _appLifetime.ApplicationStopping);
 
@@ -76,7 +76,7 @@ public class MessageIngestionService : IMessageIngestionService
         _traceLog.Trace($"Building Message Envelope");
         var toPublishEnvelope = MessageEnvelope
                                 .BuildBase(rw, linkedCts.Token, shouldThrow: true)
-                                .SetDestination(integration.Route.Target.Uri.OriginalString)
+                                .SetDestination(integration.Delivery.Destination.Uri.OriginalString)
                                 .SetPayload(rawBodyBytes)
                                 .SetHeaders(httpHeaderDictionary)
                                 .SetIntegrationId(integration.Id)

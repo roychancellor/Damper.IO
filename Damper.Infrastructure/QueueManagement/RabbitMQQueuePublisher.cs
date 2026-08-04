@@ -88,7 +88,7 @@ namespace Damper.Infrastructure.QueueManagement
                     },
                     Timestamp = new AmqpTimestamp(DateTimeOffset.UtcNow.ToUnixTimeSeconds()),
                 };
-                _traceLog.Trace($"Mapping wekhook request headers to queue message headers for binary transport");
+                _traceLog.Trace($"Mapping message request headers to queue message headers for binary transport");
                 foreach (var header in envelope.Headers)
                 {
                     properties.Headers.Add($"{DamperConstants.DAMPER_HEADER_PREFIX}{header.Key}", header.Value);

@@ -1,6 +1,5 @@
 using System.Threading.Channels;
 using Damper.Domain.Integrations;
-using Damper.Infrastructure.CustomerChannels;
 using Damper.Infrastructure.Logging;
 using Damper.Infrastructure.MessageTransport;
 using Damper.Infrastructure.ReferenceData;
@@ -33,8 +32,8 @@ namespace Damper.Infrastructure.DeliveryChannels
 
         public EgressPipeline CreatePipeline(Integration integration, Action<long> onSuspensionTriggered, CancellationToken ct)
         {
-            var bufferSize = integration.Route.Delivery.MaxQueueCapacity > 0
-                           ? integration.Route.Delivery.MaxQueueCapacity
+            var bufferSize = integration.Delivery.Settings.MaxQueueCapacity > 0
+                           ? integration.Delivery.Settings.MaxQueueCapacity
                            : _optMon.CurrentValue.RabbitMqSettings.DefaultMaxQueueCapacity; // TODO: Figure out a better default mechanism
             
             var channelOptions = new BoundedChannelOptions(bufferSize)

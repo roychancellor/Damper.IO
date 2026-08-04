@@ -13,9 +13,9 @@ namespace Damper.Infrastructure.Observability
             Meter.CreateCounter<long>("damper.messages.dead.lettered", "messages", "Count of messages moved to DLQ");
 
         public static readonly Counter<long> DeliverySuccessCounter = 
-            Meter.CreateCounter<long>("damper.messages.delivered", "messages", "Count of successful webhook deliveries");
+            Meter.CreateCounter<long>("damper.messages.delivered", "messages", "Count of successful message deliveries");
 
         public static readonly Counter<long> UnroutableMessageCounter = 
-            Meter.CreateCounter<long>("damper.messages.unroutable", "messages", "Count of unroutable webhook messages");
+            Meter.CreateCounter<long>("damper.messages.unroutable", "messages", "Count of unroutable message messages");
     }
 }

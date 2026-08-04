@@ -55,7 +55,7 @@ namespace Damper.Infrastructure.MessageTransport
 
         public Result<string> LogAndGenerateFailureResult()
         {
-            Loggers.Request.Error($"{this.ErrorMessage} | REPLACE_CUSTOMER_ID");
+            Loggers.Request.Error($"{this.ErrorMessage}");
             return Result<string>.Failure(this.ErrorType, this.ErrorMessage);
         }
 
@@ -68,13 +68,13 @@ namespace Damper.Infrastructure.MessageTransport
                 // Check for multiple Content-Type headers - a violation
                 if (contentTypeReceived.Count > 1)
                 {
-                    result =  this.SetError($"The incoming webhook has multiple Content-Type header entries | HDR: {contentTypeReceived}", ErrorType.BadRequest)
+                    result =  this.SetError($"The incoming message has multiple Content-Type header entries | HDR: {contentTypeReceived}", ErrorType.BadRequest)
                                 .LogAndGenerateFailureResult();
                     return false;
                 }
                 if (!MediaTypeHeaderValue.TryParse(contentTypeReceived, out _))
                 {
-                    result = this.SetError($"The incoming webhook Content-Type header is unparsable | HDR: {contentTypeReceived}", ErrorType.BadRequest)
+                    result = this.SetError($"The incoming message Content-Type header is unparsable | HDR: {contentTypeReceived}", ErrorType.BadRequest)
                             .LogAndGenerateFailureResult();
                     return false;
                 }

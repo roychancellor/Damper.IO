@@ -1,7 +1,7 @@
 using System.Text;
 using System.Threading.Channels;
 using Damper.Domain.Common;
-using Damper.Infrastructure.ChannelRegistry;
+using Damper.Infrastructure.DeliveryChannels;
 using Damper.Infrastructure.Logging;
 using Damper.Infrastructure.MessageTransport;
 using Damper.Infrastructure.Observability;

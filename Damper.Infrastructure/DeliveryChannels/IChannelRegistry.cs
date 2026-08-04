@@ -1,6 +1,4 @@
-using Damper.Infrastructure.CustomerChannels;
-
-namespace Damper.Infrastructure.ChannelRegistry
+namespace Damper.Infrastructure.DeliveryChannels
 {
     public interface IChannelRegistry
     {

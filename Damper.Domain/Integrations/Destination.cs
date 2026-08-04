@@ -1,6 +1,6 @@
 namespace Damper.Domain.Integrations
 {
-    public sealed class MessageDestination
+    public sealed class Destination
     {
         public Uri Uri { get; init; } = default!;
 

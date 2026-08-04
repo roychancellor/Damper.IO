@@ -1,7 +1,6 @@
 using Damper.Domain.Integrations;
-using Damper.Infrastructure.Repositories;
 
-namespace Damper.Infrastructure.CustomerChannels
+namespace Damper.Infrastructure.DeliveryChannels
 {
     public interface IEgressPipelineFactory
     {

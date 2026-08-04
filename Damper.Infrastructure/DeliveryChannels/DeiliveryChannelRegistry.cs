@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using Damper.Infrastructure.ChannelRegistry;
 using Damper.Infrastructure.Logging;
 using Damper.Infrastructure.Repositories;
 using Microsoft.Extensions.DependencyInjection;
@@ -7,8 +6,6 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Hosting;
 using Damper.Infrastructure.ReferenceData;
 using Microsoft.Extensions.Options;
-using Damper.Infrastructure.CustomerChannels;
-using Damper.Domain.Common;
 using Damper.Domain.Integrations;
 
 namespace Damper.Infrastructure.DeliveryChannels
@@ -137,7 +134,7 @@ namespace Damper.Infrastructure.DeliveryChannels
         {
             if (!_suspendedIntegrations.TryAdd(integrationId, default))
             {
-                _log.Warn("Customer is already suspended | INTEG ID: {id}", integrationId);
+                _log.Warn("Integration is already suspended | INTEG ID: {id}", integrationId);
                 return;
             }
             _log.Error("Circuit Breaker Tripped in Registry for Integration - Tearing down channel | INTEG ID: {id}", integrationId);
@@ -176,7 +173,7 @@ namespace Damper.Infrastructure.DeliveryChannels
 
             // Kick off the asynchronous self-healing cooldown task
             // We discard the Task return object ('_ =') because this is designed as fire-and-forget.
-            _traceLog.Trace($"Starting cooldown period before attempting to resume the customer | INTEG ID: {integrationId}");
+            _traceLog.Trace($"Starting cooldown period before attempting to resume the integration | INTEG ID: {integrationId}");
             _ = AutoResumeAfterCooldownAsync(integrationId, TimeSpan.FromSeconds(_optMon.CurrentValue.EgressSettings.CircuitBreakerCooldownSeconds));
         }
 
@@ -192,14 +189,14 @@ namespace Damper.Infrastructure.DeliveryChannels
 
                 if (_suspendedIntegrations.ContainsKey(integrationId))
                 {
-                    _log.Warn("Circuit breaker cooldown elapsed for Customer - Attempting automatic self-healing. | INTEG ID: {Id}", integrationId);
+                    _log.Warn("Circuit breaker cooldown elapsed for Integration - Attempting automatic self-healing. | INTEG ID: {Id}", integrationId);
                     ResumeIntegration(integrationId);
                 }
             }
             catch (OperationCanceledException)
             {
                 // Host application is shutting down; ignore and let the task exit cleanly
-                _log.Warn($"Application is shutting down during customer cooldown - ignoring | INTEG ID: {integrationId}");
+                _log.Warn($"Application is shutting down during integration cooldown - ignoring | INTEG ID: {integrationId}");
             }
             catch (Exception ex)
             {
@@ -208,7 +205,7 @@ namespace Damper.Infrastructure.DeliveryChannels
         }
 
         /// <summary>
-        /// Invoked by your administration tier or dashboard event receiver when a customer re-enables their endpoint.
+        /// Invoked by your administration tier or dashboard event receiver when an integration endpoint becomes re-enable.
         /// </summary
         public void ResumeIntegration(long integrationId)
         {

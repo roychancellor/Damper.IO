@@ -1,7 +1,7 @@
 using System.Threading.Channels;
 using Damper.Infrastructure.MessageTransport;
 
-namespace Damper.Infrastructure.CustomerChannels
+namespace Damper.Infrastructure.DeliveryChannels
 {
     public class EgressPipeline : IDisposable
     {

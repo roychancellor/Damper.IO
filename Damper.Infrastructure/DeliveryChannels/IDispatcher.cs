@@ -1,7 +1,7 @@
 using Damper.Domain.Integrations;
 using Damper.Infrastructure.MessageTransport;
 
-namespace Damper.Infrastructure.CustomerChannels
+namespace Damper.Infrastructure.DeliveryChannels
 {
     public interface IDispatcher
     {

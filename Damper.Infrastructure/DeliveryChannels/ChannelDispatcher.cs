@@ -2,7 +2,6 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Threading.Channels;
 using Damper.Domain.Integrations;
-using Damper.Infrastructure.CustomerChannels;
 using Damper.Infrastructure.Logging;
 using Damper.Infrastructure.MessageTransport;
 using Damper.Infrastructure.Observability;
@@ -71,7 +70,7 @@ namespace Damper.Infrastructure.DeliveryChannels
 
                     // Drain up to the maximum burst capacity allowed for this interval window
                     // or until there are no more messages to read
-                    while (messagesInBatch.IsBelowCustomerRate(_integration) && _reader.TryRead(out var envelope))
+                    while (messagesInBatch.IsBelowDestinationRate(_integration) && _reader.TryRead(out var envelope))
                     {
                         deliveryTasks.Add(DeliverMessageWithRetryAsync(envelope, _integration, ct));
                         messagesInBatch++;
@@ -79,7 +78,7 @@ namespace Damper.Infrastructure.DeliveryChannels
 
                     if (deliveryTasks.Count == 0) { continue; }
 
-                    _traceLog.Trace($"Messages actively being sent to customer endpoint - awaiting all delivery tasks for the batch");
+                    _traceLog.Trace($"Messages actively being sent to destination - awaiting all delivery tasks for the batch");
 
                     // Execute the outbound HTTP burst concurrently
                     var deliveryResults = await Task.WhenAll(deliveryTasks);
@@ -91,7 +90,7 @@ namespace Damper.Infrastructure.DeliveryChannels
                     if (deliveryResults.HasAtLeastOneError())
                     {
                         _traceLog.Trace($"Delivery tasks completed with error(s) | ERROR COUNT: {deliveryResults.Count(r => r == false)}");
-                        _log.Error("Circuit breaker triggered for Customer {Id} due to exhausted retry count.", _integrationId);
+                        _log.Error("Circuit breaker triggered for Integration {Id} due to exhausted retry count.", _integrationId);
 
                         // Drain anything still buffered but unread - it was pulled off RabbitMQ and is unacked,
                         // but no delivery task will ever pick it up once this loop exits. Park it for automatic
@@ -110,7 +109,7 @@ namespace Damper.Infrastructure.DeliveryChannels
                     {
                         _traceLog.Trace($"There are new messages but waiting for the configured delivery time for a predictable recovery window.");
                         // Guarantees a true, predictable recovery window between outbound bursts
-                        await Task.Delay(TimeSpan.FromMilliseconds(_integration.Route.Delivery.DeliveryIntervalMillis), ct);
+                        await Task.Delay(TimeSpan.FromMilliseconds(_integration.Delivery.Settings.DeliveryIntervalMillis), ct);
                     }
 
                     // Sync configuration definitions once per processing cycle
@@ -128,11 +127,11 @@ namespace Damper.Infrastructure.DeliveryChannels
                 if (_reader.Completion.IsFaulted)
                 {
                     var exception = _reader.Completion.Exception?.Flatten();
-                    _log.Error("Channel pipeline faulted for Customer {Id}.", _integrationId, exception);
+                    _log.Error("Channel pipeline faulted for Integration {Id}.", _integrationId, exception);
                 }
                 else
                 {
-                    _log.Info("Channel pipeline finalized for Customer {Id}.", _integrationId);
+                    _log.Info("Channel pipeline finalized for Integration {Id}.", _integrationId);
                 }
             }
         }
@@ -141,7 +140,7 @@ namespace Damper.Infrastructure.DeliveryChannels
         {
             try
             {
-                _traceLog.Trace($"Refreshing customer configuration | INTEG ID: {_integrationId}");
+                _traceLog.Trace($"Refreshing integration configuration | INTEG ID: {_integrationId}");
 
                 using var scope = _scopeFactory.CreateScope();
                 var repo = scope.ServiceProvider.GetRequiredService<IIntegrationRepository>();
@@ -155,7 +154,7 @@ namespace Damper.Infrastructure.DeliveryChannels
             catch (Exception ex)
             {
                 // Do not crash the entire consumer if the repository is temporarily down
-                _log.Warn("Failed to refresh pacing configuration for customer {CustomerId}. Maintaining last known state.", _integrationId, ex);
+                _log.Warn("Failed to refresh pacing configuration for integration {Id}. Maintaining last known state.", _integrationId, ex);
             }
         }
         
@@ -166,10 +165,10 @@ namespace Damper.Infrastructure.DeliveryChannels
                 // Allow NLog to automatically populate tracking metadata in every log statement withinin this method
                 using var correlationScope = _log.BeginCorrelationScope(envelope.CorrelationId.Value, envelope.IntegrationId, envelope.IntegrationName.Value);
 
-                _traceLog.Debug($"DeliverWebhookWithRetryAsync starting | DEST: {envelope.DestinationUrl}");
+                _traceLog.Debug($"DeliverMessageWithRetryAsync starting | DEST: {envelope.DestinationUrl}");
                 
-                var maxAttempts = integration.Route.Delivery.MaxRetryAttempts;
-                var retryBackoff = TimeSpan.FromMilliseconds(integration.Route.Delivery.InitialRetryDelayMillis);
+                var maxAttempts = integration.Delivery.Settings.MaxRetryAttempts;
+                var retryBackoff = TimeSpan.FromMilliseconds(integration.Delivery.Settings.InitialRetryDelayMillis);
 
                 while (envelope.HasAttemptsRemaining(maxAttempts))
                 {
@@ -194,7 +193,7 @@ namespace Damper.Infrastructure.DeliveryChannels
                         _traceLog.Debug($"Sending HTTP POST request now | URL: {envelope.DestinationUrl}");
                         using var cts = CancellationTokenSource
                                         .CreateLinkedTokenSource(ct)
-                                        .SetRequestTimeout(integration.Route.Delivery.RequestTimeoutMillis);
+                                        .SetRequestTimeout(integration.Delivery.Settings.RequestTimeoutMillis);
 
                         using var response = await client.SendAsync(httpRequest, cts.Token);
 
@@ -239,7 +238,7 @@ namespace Damper.Infrastructure.DeliveryChannels
                     _contextPool.Return(envelope.AckContext);
                     envelope.AckContext = null;
                 }
-                _traceLog.Trace($"DeliverWebhookWithRetryAsync finished");
+                _traceLog.Trace($"DeliverMessageWithRetryAsync finished");
             }
         }
 
@@ -256,9 +255,9 @@ namespace Damper.Infrastructure.DeliveryChannels
 
     public static class DispatcherExtensions
     {
-        public static bool IsBelowCustomerRate(this int messagesInBatch, Integration _integration)
+        public static bool IsBelowDestinationRate(this int messagesInBatch, Integration _integration)
         {
-            return messagesInBatch < _integration.Route.Delivery.RequestsPerInterval;
+            return messagesInBatch < _integration.Delivery.Settings.RequestsPerInterval;
         }
 
         public static bool Is4XX(this HttpStatusCode statusCode)

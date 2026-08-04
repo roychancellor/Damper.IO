@@ -21,11 +21,6 @@ namespace Damper.Infrastructure.Repositories
             throw new NotImplementedException();
         }
 
-        public Task<CustomerConfig?> GetByIdAsync(string customerId, CancellationToken ct)
-        {
-            throw new NotImplementedException();
-        }
-
         public Task<Integration?> GetByIdAsync(long integrationId, CancellationToken cancellationToken = default)
         {
             throw new NotImplementedException();

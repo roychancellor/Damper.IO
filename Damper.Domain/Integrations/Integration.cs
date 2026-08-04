@@ -12,7 +12,7 @@ namespace Damper.Domain.Integrations
     |       IngressEndpoint
     |
     |-- "How do requests leave?"
-            WebhookRoute
+            MessageRoute
     */
     /*
     FUTURE ADMIN API:
@@ -31,11 +31,9 @@ namespace Damper.Domain.Integrations
 
         public bool Enabled { get; init; } = true;
 
-        public long Version { get; init; }
+        public Ingress Ingress { get; init; } = new();
 
-        public IngressEndpoint Ingress { get; init; } = new();
-
-        public MessageRoute Route { get; init; } = new();
+        public Delivery Delivery { get; init; } = new();
 
         public DateTimeOffset CreatedUtc { get; init; }
 

@@ -142,7 +142,7 @@ namespace Damper.Infrastructure.MessageTransport
 
         public static HttpRequestMessage BuildHttpRequest(this MessageEnvelope envelope, Integration integration)
         {
-            var request = new HttpRequestMessage(HttpMethod.Post, integration.Route.Target.Uri)
+            var request = new HttpRequestMessage(HttpMethod.Post, integration.Delivery.Destination.Uri)
             {
                 Content = new ReadOnlyMemoryContent(envelope.RawPayloadBytes)
             };
