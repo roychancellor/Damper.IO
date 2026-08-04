@@ -1,4 +1,5 @@
 using Damper.Infrastructure.Logging;
+using Damper.Infrastructure.MessageTransport;
 using Damper.Infrastructure.ReferenceData;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -24,22 +25,22 @@ namespace Damper.Infrastructure.QueueManagement
             _appOptMon = appOptMon;
         }
 
-        public async Task<bool> TryPublishAsync(PublishWrapper pw)
+        public async Task<bool> TryPublishAsync(MessageEnvelope envelope)
         {
             try
             {
                 _traceLog.Trace($"Starting publish");
-                if (pw == null)
+                if (envelope == null)
                 {
-                    _log.Error($"While attempting to publish - passed in Publish Wrapper is NULL");
-                    throw new ArgumentNullException(nameof(pw), "Publish Wrapper cannot be null.");
+                    _log.Error($"While attempting to publish - passed in Message Envelope is NULL");
+                    throw new ArgumentNullException(nameof(envelope), "Message Envelope cannot be null.");
                 }
-                _traceLog.Trace($"Received Publish Wrapper: {pw}");
-                if (!pw.IsValid(out string invalidMessage))
+                _traceLog.Trace($"Received Message Envelope: {envelope}");
+                if (!envelope.IsValid(out string invalidMessage))
                 {
-                    var msg = $"PublishAsync - passed in Publish Wrapper is invalid | REASON: {invalidMessage}";
+                    var msg = $"PublishAsync- passed in Message Envelope is invalid | REASON: {invalidMessage}";
                     _traceLog.Error(msg);
-                    throw new ArgumentNullException(nameof(pw), msg);
+                    throw new ArgumentNullException(nameof(envelope), msg);
                 }
                 
                 // Lazily initialize the channel for this HTTP request scope if it doesn't exist
@@ -57,12 +58,12 @@ namespace Damper.Infrastructure.QueueManagement
                     var channelOptions = new CreateChannelOptions(publisherConfirmationsEnabled: true, publisherConfirmationTrackingEnabled: true);
 
                     _traceLog.Trace($"Creating queue channel");
-                    _channel = await _connection.CreateChannelAsync(channelOptions, pw.CancelToken);
+                    _channel = await _connection.CreateChannelAsync(channelOptions, envelope.CancelToken);
                     _channel.BasicReturnAsync += OnBasicReturnAsync;
                 }
                 
-                _traceLog.Trace($"Converting webhook envelope payload to bytes");
-                var bodyBytes = pw.Payload.RawPayloadBytes;
+                _traceLog.Trace($"Converting message envelope payload to bytes");
+                var bodyBytes = envelope.RawPayloadBytes;
                 _traceLog.Trace($"NUM BYTES: {bodyBytes.Length}");
                 
                 // Modern v7+ Properties Setup with async delivery tracking
@@ -72,18 +73,23 @@ namespace Damper.Infrastructure.QueueManagement
                     ContentType = "application/json",
                     ContentEncoding = "utf-8",
                     DeliveryMode = DeliveryModes.Persistent,
-                    MessageId = pw.CorrelationId,
+                    MessageId = envelope.CorrelationId.Value,
+                    // TODO: Put the creation of the Rabbit MQ headers in a common method for DRYness
+                    // RABBIT MQ HEADERS ARE THE PRIMARY WAY OF PASSING METADATA TO THE DELIVERY SIDE BY BYTES
+                    // TO AVOID ANY SERIALIZATION/DESERIALIZATION OF OBJECTS!!!
                     Headers = new Dictionary<string, object?>
                     {
-                        { DamperConstants.X_DAMPER_CORRELATION_ID, pw.CorrelationId },
-                        { DamperConstants.X_DAMPER_CUSTOMER_ID, pw.CustomerId },
-                        { DamperConstants.X_DAMPER_DESTINATION_URL, pw.Payload.DestinationUrl },
-                        { DamperConstants.X_DAMPER_ATTEMPT_COUNT, pw.Payload.AttemptCount },
+                        { DamperConstants.X_DAMPER_CORRELATION_ID, envelope.CorrelationId.Value },
+                        { DamperConstants.X_DAMPER_API_KEY, envelope.ApiKey.Value },
+                        { DamperConstants.X_DAMPER_INTEGRATION_ID, envelope.IntegrationId.ToString() },
+                        { DamperConstants.X_DAMPER_INTEGRATION_NAME, envelope.IntegrationName.Value },
+                        { DamperConstants.X_DAMPER_DESTINATION_URL, envelope.DestinationUrl },
+                        { DamperConstants.X_DAMPER_ATTEMPT_COUNT, envelope.AttemptCount },
                     },
                     Timestamp = new AmqpTimestamp(DateTimeOffset.UtcNow.ToUnixTimeSeconds()),
                 };
                 _traceLog.Trace($"Mapping wekhook request headers to queue message headers for binary transport");
-                foreach (var header in pw.Payload.Headers)
+                foreach (var header in envelope.Headers)
                 {
                     properties.Headers.Add($"{DamperConstants.DAMPER_HEADER_PREFIX}{header.Key}", header.Value);
                 }
@@ -92,22 +98,22 @@ namespace Damper.Infrastructure.QueueManagement
                 _traceLog.Trace($"Publishing to exchange");
                 await _channel.BasicPublishAsync(
                     exchange: _appOptMon.CurrentValue.RabbitMqSettings.ExchangeName,
-                    routingKey: pw.CustomerId,
+                    routingKey: envelope.IntegrationId.ToString(),
                     mandatory: true,
                     basicProperties: properties,
                     body: bodyBytes,
-                    cancellationToken: pw.CancelToken
+                    cancellationToken: envelope.CancelToken
                 );
                 _traceLog.Trace($"Publish successful!");
                 return true;
             }
             catch (Exception ex)
             {
-                if (pw.ShouldThrow)
+                if (envelope.ShouldThrow)
                 {
-                    var msg = $"Fatal publish failure | CUSTOMER ID: {pw.CustomerId}";
+                    var msg = $"Fatal publish failure | INTEG ID: {envelope.IntegrationId} | INTEG NAME: {envelope.IntegrationName}";
                     _traceLog.Error(msg, ex);
-                    throw new WebhookPublishException(msg, ex);
+                    throw new MessagePublishException(msg, ex);
                 }
                 _traceLog.Error($"Publish failed! (ShouldThrow = false)");
                 return false;
@@ -129,7 +135,7 @@ namespace Damper.Infrastructure.QueueManagement
 
             // Log the unroutable message error at the FATAL level so it is LOUD!!!
             _log.Fatal(
-                "RabbitMQ message returned (unroutable) | CORR ID: {Corr} | CUST ID: {Key} | XCHG: {Exchange} | Code: {Code} | Text: {Text}",
+                "RabbitMQ message returned (unroutable) | CORR ID: {Corr} | INTEG ID: {Key} | XCHG: {Exchange} | Code: {Code} | Text: {Text}",
                 ea.BasicProperties.MessageId,
                 routingKey,
                 exchange,
@@ -154,8 +160,8 @@ namespace Damper.Infrastructure.QueueManagement
         }
     }
 
-    public class WebhookPublishException : Exception
+    public class MessagePublishException : Exception
     {
-        public WebhookPublishException(string message, Exception innerException) : base(message, innerException) { }
+        public MessagePublishException(string message, Exception innerException) : base(message, innerException) { }
     }
 }

@@ -8,7 +8,7 @@ using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 using RabbitMQ.Client.Exceptions;
 
-namespace Damper.Core.OutboundService
+namespace Damper.Core.MessageProcessing
 {
     public class ShardBackgroundWorker : BackgroundService
     {
@@ -41,20 +41,20 @@ namespace Damper.Core.OutboundService
             _channel = await _connection.CreateChannelAsync(cancellationToken: stoppingToken);
 
             var rmqData = _optMon.CurrentValue.RabbitMqSettings;
-            var queueName = $"{rmqData.IngressShardPrefix}{_shardIndex:D2}";
+            var shardQueueName = $"{rmqData.IngressShardPrefix}{_shardIndex:D2}";
             var dlxName = rmqData.DeadLetterExchange;
             var dlqName = rmqData.DeadLetterQueue;
-            var parkxName = rmqData.ParkingLotExchange;
-            var parkQueue = rmqData.ParkingLotQueue;
+            var parkingXchgName = rmqData.ParkingLotExchange;
+            var parkingQueueName = rmqData.ParkingLotQueue;
 
             try
             {
                 // Verify the infrastructure exists (Fail-fast if missing)
                 await _channel.ExchangeDeclarePassiveAsync(dlxName, cancellationToken: stoppingToken);
                 await _channel.QueueDeclarePassiveAsync(dlqName, cancellationToken: stoppingToken);
-                await _channel.QueueDeclarePassiveAsync(queueName, cancellationToken: stoppingToken);
-                await _channel.ExchangeDeclarePassiveAsync(parkxName, cancellationToken: stoppingToken);
-                await _channel.QueueDeclarePassiveAsync(parkQueue, cancellationToken: stoppingToken);
+                await _channel.QueueDeclarePassiveAsync(shardQueueName, cancellationToken: stoppingToken);
+                await _channel.ExchangeDeclarePassiveAsync(parkingXchgName, cancellationToken: stoppingToken);
+                await _channel.QueueDeclarePassiveAsync(parkingQueueName, cancellationToken: stoppingToken);
             }
             catch (OperationInterruptedException ex)
             {
@@ -71,9 +71,10 @@ namespace Damper.Core.OutboundService
             var consumer = new AsyncEventingBasicConsumer(_channel);
             consumer.ReceivedAsync += (sender, eventArgs) => _messageProcessor.ProcessMessageAsync(eventArgs, processingContext);
 
-            await _channel.BasicConsumeAsync(queueName, autoAck: false, consumer, stoppingToken);
-            _appLog.Info("Shard consumer thread bound to queue | SHARD {Index:D2} --> QUEUE {QueueName}", _shardIndex, queueName);
+            await _channel.BasicConsumeAsync(shardQueueName, autoAck: false, consumer, stoppingToken);
+            _appLog.Info("Shard consumer thread bound to queue | SHARD {Index:D2} --> QUEUE {QueueName}", _shardIndex, shardQueueName);
             
+            // This background task is meant to run the entirety of the application lifetime
             await Task.Delay(Timeout.Infinite, stoppingToken);
         }
 
@@ -111,12 +112,15 @@ namespace Damper.Core.OutboundService
             public async Task NackAsync(ulong deliveryTag, bool multiple, bool requeue) => await _channel.BasicNackAsync(deliveryTag, multiple, requeue);
             public async Task ParkForRetryAsync(MessageEnvelope envelope, ulong deliveryTag)
             {
+                // TODO: Create an extension method or some other common method for this for DRYness (refer to RabbitMQQueuePublisher)
                 var headers = new Dictionary<string, object?>
                 {
-                    { DamperConstants.X_DAMPER_CUSTOMER_ID, envelope.CustomerId },
+                    { DamperConstants.X_DAMPER_CORRELATION_ID, envelope.CorrelationId.Value },
+                    { DamperConstants.X_DAMPER_API_KEY, envelope.ApiKey.Value },
+                    { DamperConstants.X_DAMPER_INTEGRATION_ID, envelope.IntegrationId.ToString() },
+                    { DamperConstants.X_DAMPER_INTEGRATION_NAME, envelope.IntegrationName.Value },
                     { DamperConstants.X_DAMPER_DESTINATION_URL, envelope.DestinationUrl },
-                    { DamperConstants.X_DAMPER_CORRELATION_ID, envelope.CorrelationId },
-                    { DamperConstants.X_DAMPER_ATTEMPT_COUNT, 1 } // We want this to come back fresh and ready to retry sending
+                    { DamperConstants.X_DAMPER_ATTEMPT_COUNT, 1 }, // We want this to come back fresh and ready to retry sending
                 };
                 foreach (var (key, value) in envelope.Headers)
                 {
@@ -131,23 +135,27 @@ namespace Damper.Core.OutboundService
                     Headers = headers
                 };
 
-                // Routing key MUST be the customer ID, not the queue name — see comment
+                // Routing key MUST be the Integration ID, not the queue name — see comment
                 // on the parking queue's dead-letter config for why this matters.
                 await _channel.BasicPublishAsync(
                     exchange: _optMon.CurrentValue.RabbitMqSettings.ParkingLotExchange,
-                    routingKey: envelope.CustomerId,
+                    routingKey: envelope.IntegrationId.ToString(),
                     mandatory: false, // fanout with one queue - nothing to fail to route to
                     basicProperties: props,
-                    body: envelope.RawPayloadBytes);
+                    body: envelope.RawPayloadBytes,
+                    cancellationToken: envelope.CancelToken
+                );
 
                 await _channel.BasicAckAsync(deliveryTag, multiple: false);
 
-                _reqLog.Info("Parked message for delayed retry | CUST ID: {Id} | TTL_MS: {Ttl}", envelope.CustomerId, ttlMs);
+                _reqLog.Info("Parked message for delayed retry | INTEG ID: {Id} | INTEG NAME: {Name} | TTL_MS: {Ttl}",
+                                envelope.IntegrationId, envelope.IntegrationName, ttlMs);
             }
 
             private int GetTTLMillis()
             {
-                return _optMon.CurrentValue.RabbitMqSettings.ParkingLotBaseTTLMillis + Random.Shared.Next(0, _optMon.CurrentValue.RabbitMqSettings.ParkingLotJitterMillis);
+                return _optMon.CurrentValue.RabbitMqSettings.ParkingLotBaseTTLMillis
+                       + Random.Shared.Next(0, _optMon.CurrentValue.RabbitMqSettings.ParkingLotJitterMillis);
             }
         }
 

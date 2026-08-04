@@ -8,7 +8,6 @@ using NLog;
 using Damper.Infrastructure.ReferenceData;
 using Damper.Infrastructure.CustomerChannels;
 using Damper.Infrastructure.ChannelRegistry;
-using Damper.Core.OutboundService;
 using Microsoft.Extensions.ObjectPool;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
@@ -16,6 +15,7 @@ using RabbitMQ.Client;
 using Microsoft.Extensions.Options;
 using Damper.Infrastructure.MessageTransport;
 using Damper.Infrastructure.DeliveryChannels;
+using Damper.Core.MessageProcessing;
 
 var bootstrapLogger = LogManager.Setup().GetCurrentClassLogger();
 
@@ -118,15 +118,15 @@ try
     app.UseHttpsRedirection();
     
     Loggers.Application.Info($"Defining minimal API - MapPost");
-    app.MapPost("v1/inbound/{customerId}", async (
-        string customerId, 
+    app.MapPost("v1/inbound/{apiKey}", async (
+        string apiKey, 
         HttpContext context,
         IMessageIngestionService ingestionService,
         CancellationToken ct) =>
     {
         // Middleware creates the correlation ID and puts it in the HttpContext.Items dictionary
         var correlationId = context.Items["CorrelationId"]?.ToString() ?? $"SYSGEN-{CorrelationIdGenerator.Generate()}";
-        var thisRequest = RequestWrapper.BuildFrom(correlationId, customerId, context.Request.Headers, context.Request.Body, ct);
+        var thisRequest = RequestWrapper.BuildFrom(new(correlationId), apiKey, context.Request.Headers, context.Request.Body, ct);
         var result = await ingestionService.ProcessIngressAsync(thisRequest);
         
         return result.IsSuccess

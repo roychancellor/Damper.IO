@@ -1,4 +1,5 @@
 using System.Net.Http.Headers;
+using Damper.Domain.Common;
 using Damper.Infrastructure.Logging;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Primitives;
@@ -7,20 +8,20 @@ namespace Damper.Infrastructure.MessageTransport
 {
     public class RequestWrapper
     {
-        public string CorrelationId{ get; set; } = string.Empty;
-        public string CustomerId{ get; set; } = string.Empty;
+        public ApiKey ApiKey { get; set; }
+        public CorrelationId CorrelationId{ get; set; } = new(string.Empty);
         public IHeaderDictionary HttpHeaders{ get; set; } = new HeaderDictionary();
         public Stream RequestBody{ get; set; } = new MemoryStream();
         public CancellationToken CancelToken { get; set; }
         public ErrorType ErrorType { get; set; }
         public string ErrorMessage { get; set; } = string.Empty;
 
-        public static RequestWrapper BuildFrom(string correlationId, string customerId, IHeaderDictionary headers, Stream body, CancellationToken ct)
+        public static RequestWrapper BuildFrom(CorrelationId correlationId, string apiKey, IHeaderDictionary headers, Stream body, CancellationToken ct)
         {
             return new RequestWrapper
             {
+                ApiKey = new(apiKey),
                 CorrelationId = correlationId,
-                CustomerId = customerId,
                 HttpHeaders = headers,
                 RequestBody = body,
                 CancelToken = ct,
@@ -37,8 +38,7 @@ namespace Damper.Infrastructure.MessageTransport
         public bool IsProcessable()
         {
             return !(
-                        string.IsNullOrWhiteSpace(CorrelationId) ||
-                        string.IsNullOrWhiteSpace(CustomerId) ||
+                        string.IsNullOrWhiteSpace(CorrelationId.Value) ||
                         HttpHeaders == null ||
                         HttpHeaders.Count == 0 ||
                         RequestBody == null
@@ -55,7 +55,7 @@ namespace Damper.Infrastructure.MessageTransport
 
         public Result<string> LogAndGenerateFailureResult()
         {
-            Loggers.Request.Error($"{this.ErrorMessage} | CUSTOMER: {this.CustomerId}");
+            Loggers.Request.Error($"{this.ErrorMessage} | REPLACE_CUSTOMER_ID");
             return Result<string>.Failure(this.ErrorType, this.ErrorMessage);
         }
 
@@ -79,7 +79,7 @@ namespace Damper.Infrastructure.MessageTransport
                     return false;
                 }
             }
-            result = Result<string>.Success(this.CorrelationId);
+            result = Result<string>.Success(this.CorrelationId.Value);
             return true;
         }
     }

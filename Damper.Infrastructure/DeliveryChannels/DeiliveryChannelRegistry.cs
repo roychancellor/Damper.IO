@@ -8,6 +8,8 @@ using Microsoft.Extensions.Hosting;
 using Damper.Infrastructure.ReferenceData;
 using Microsoft.Extensions.Options;
 using Damper.Infrastructure.CustomerChannels;
+using Damper.Domain.Common;
+using Damper.Domain.Integrations;
 
 namespace Damper.Infrastructure.DeliveryChannels
 {
@@ -16,10 +18,10 @@ namespace Damper.Infrastructure.DeliveryChannels
         private static readonly ILogger _log = Loggers.Request;
         private static readonly ILogger _traceLog = Loggers.RequestTrace;
 
-        private readonly ConcurrentDictionary<string, EgressPipeline> _registry = new();
+        private readonly ConcurrentDictionary<long, EgressPipeline> _registry = new();
         
-        // Tracks suspended customer IDs with O(1) thread-safe lookups
-        private readonly ConcurrentDictionary<string, byte> _suspendedCustomers = new();
+        // Tracks suspended integration IDs with O(1) thread-safe lookups
+        private readonly ConcurrentDictionary<long, byte> _suspendedIntegrations = new();
 
         private readonly CancellationToken _ct;
         private readonly IServiceScopeFactory _scopeFactory;
@@ -44,84 +46,84 @@ namespace Damper.Infrastructure.DeliveryChannels
             _optMon = optMon;
         }
 
-        public async Task<EgressPipeline> GetOrCreatePipelineAsync(string customerId)
+        public async Task<EgressPipeline> GetOrCreatePipelineAsync(long integrationId)
         {
-            // FAST FAIL IF CUSTOMER IS SUSPENDED
-            if (_suspendedCustomers.ContainsKey(customerId))
+            // FAST FAIL IF INTEGRATION IS SUSPENDED
+            if (_suspendedIntegrations.ContainsKey(integrationId))
             {
-                _log.Warn($"While attempting to get or create customer pipeline - customer is suspended | CUST ID: {customerId}");
+                _log.Warn($"While attempting to get or create integration pipeline - integration is suspended | INTEG ID: {integrationId}");
                 return _suspendedPipeline;
             }
 
             // REGISTRY HIT WITH CHECK FOR DEAD PIPELINE
-            if (_registry.TryGetValue(customerId, out var pipeline))
+            if (_registry.TryGetValue(integrationId, out var pipeline))
             {
                 if (!pipeline.BackgroundTask.IsCompleted)
                 {
-                    _traceLog.Trace($"Channel registry HIT for customer ID {customerId} - returning writer immediately");
+                    _traceLog.Trace($"Channel registry HIT for integration ID {integrationId} - returning writer immediately");
                     return pipeline; // Pipeline is healthy and running
                 }
                 // If the task is finished (Faulted, Canceled, or RanToCompletion), 
                 // treat it as a REGISTRY MISS by evicting it immediately because the pipeline is dead.
-                _log.Warn("Stale/Dead pipeline detected for CUSTOMER ID {Id}. Evicting.", customerId);
-                _registry.TryRemove(customerId, out _);
+                _log.Warn("Stale/Dead pipeline detected for INTEGRATION ID {Id}. Evicting.", integrationId);
+                _registry.TryRemove(integrationId, out _);
             }
 
             // REGISTRY MISS: Lock exclusively to build the pipeline instance safely
             await _initLock.WaitAsync(_ct);
-            CustomerConfig? currentConfig;
+            Integration? currentIntegration;
             try
             {
-                _log.Warn($"Channel registry MISS - attempting to lock and build the pipeline safely | CUST ID: {customerId}");
+                _log.Warn($"Channel registry MISS - attempting to lock and build the pipeline safely | INTEG ID: {integrationId}");
                 // Double-check lock mitigation pattern
-                if (_registry.TryGetValue(customerId, out pipeline))
+                if (_registry.TryGetValue(integrationId, out pipeline))
                 {
                     if (!pipeline.BackgroundTask.IsCompleted)
                     {
-                        _log.Debug($"Secondary channel registry HIT for customer ID {customerId} - returning writer immediately");
+                        _log.Debug($"Secondary channel registry HIT for integration ID {integrationId} - returning writer immediately");
                         return pipeline; // Pipeline is healthy and running
                     }
-                    _log.Warn("Secondary stale/dead pipeline detected for CUSTOMER ID {Id}. Evicting.", customerId);
-                    _registry.TryRemove(customerId, out _);
+                    _log.Warn("Secondary stale/dead pipeline detected for INTEGRATION ID {Id}. Evicting.", integrationId);
+                    _registry.TryRemove(integrationId, out _);
                 }
 
-                // If the customer was marked suspended while we were waiting for the lock, catch it here
-                if (_suspendedCustomers.ContainsKey(customerId))
+                // If the integration was marked suspended while we were waiting for the lock, catch it here
+                if (_suspendedIntegrations.ContainsKey(integrationId))
                 {
-                    _log.Warn($"While attempting secondary attempt to get or create customer pipeline - customer is suspended | CUST ID: {customerId}");
+                    _log.Warn($"While attempting secondary attempt to get or create integration pipeline - integration is suspended | INTEG ID: {integrationId}");
                     return _suspendedPipeline;
                 }
 
                 // CREATE A NEW PIPELINE
-                currentConfig = await GetCustomerConfigAsync(customerId);
+                currentIntegration = await GetIntegrationConfigAsync(integrationId);
                 
-                _traceLog.Trace($"Creating customer pipeline from the factory | CUST ID: {customerId}");
-                void onSuspensionTriggered(string customerId) => MarkAsSuspended(customerId);
-                pipeline = _pipelineFactory.CreatePipeline(currentConfig, onSuspensionTriggered, _ct);
-                if (!_registry.TryAdd(customerId, pipeline))
+                _traceLog.Trace($"Creating integration pipeline from the factory | INTEG ID: {integrationId}");
+                void onSuspensionTriggered(long integrationId) => MarkAsSuspended(integrationId);
+                pipeline = _pipelineFactory.CreatePipeline(currentIntegration, onSuspensionTriggered, _ct);
+                if (!_registry.TryAdd(integrationId, pipeline))
                 {
-                    _log.Warn($"While attempting to add pipeline to registry, customer Id already existed | CUST ID: {customerId}");
+                    _log.Warn($"While attempting to add pipeline to registry, integration Id already existed | INTEG ID: {integrationId}");
                 }
 
                 return pipeline;
             }
             finally
             {
-                _traceLog.Trace($"Releasing pipeline creation lock | CUST ID: {customerId}");
+                _traceLog.Trace($"Releasing pipeline creation lock | INTEG ID: {integrationId}");
                 _initLock.Release();
             }
         }
 
-        private async Task<CustomerConfig> GetCustomerConfigAsync(string customerId)
+        private async Task<Integration> GetIntegrationConfigAsync(long integrationId)
         {
             using var scope = _scopeFactory.CreateScope();
-            _traceLog.Trace($"Primary + secondary channel registry MISS - getting customer repository and retrieving customer config | CUST ID: {customerId}");
+            _traceLog.Trace($"Primary + secondary channel registry MISS - getting integration repository and retrieving integration config | INTEG ID: {integrationId}");
             var repo = scope.ServiceProvider.GetRequiredService<IIntegrationRepository>();
-            var currentConfig = await repo.GetByIdAsync(customerId, _ct);
+            var currentConfig = await repo.GetByIdAsync(integrationId, _ct);
             if (currentConfig == null)
             {
-                var msg = $"Configuration missing for customer: {customerId}";
-                _log.Error($"While attempting to get customer config from repository - {msg} | CUST ID: {customerId}");
+                var msg = $"Configuration missing for integration with ID: {integrationId}";
+                _log.Error($"While attempting to get integration config from repository - {msg} | INTEG ID: {integrationId}");
                 throw new InvalidOperationException(msg);
             }
             return currentConfig;
@@ -131,109 +133,109 @@ namespace Damper.Infrastructure.DeliveryChannels
         /// Invoked by the ChannelDispatcher when an egress endpoint repeatedly fails downstream.
         /// Tears down the operational infrastructure and shifts the registry into a safe non-blocking rejection state.
         /// </summary>
-        public void MarkAsSuspended(string customerId)
+        public void MarkAsSuspended(long integrationId)
         {
-            if (!_suspendedCustomers.TryAdd(customerId, default))
+            if (!_suspendedIntegrations.TryAdd(integrationId, default))
             {
-                _log.Warn("Customer is already suspended | CUST ID: {id}", customerId);
+                _log.Warn("Customer is already suspended | INTEG ID: {id}", integrationId);
                 return;
             }
-            _log.Error("Circuit Breaker Tripped in Registry for Customer - Tearing down channel | CUST ID: {id}", customerId);
+            _log.Error("Circuit Breaker Tripped in Registry for Integration - Tearing down channel | INTEG ID: {id}", integrationId);
 
             // Evict the pipeline structure completely out of operational memory
-            _traceLog.Trace($"Evicting the customer pipeline from the registry | CUST ID: {customerId}");
-            if (_registry.TryRemove(customerId, out var pipeline))
+            _traceLog.Trace($"Evicting the integration pipeline from the registry | INTEG ID: {integrationId}");
+            if (_registry.TryRemove(integrationId, out var pipeline))
             {
                 try
                 {
                     // Forces the ChannelDispatcher loop to break execution processing naturally
-                    _traceLog.Trace($"Completing the existing pipeline channel writer | CUST ID: {customerId}");
+                    _traceLog.Trace($"Completing the existing pipeline channel writer | INTEG ID: {integrationId}");
                     pipeline.Writer.TryComplete();
                 }
                 catch (Exception ex)
                 {
-                    _log.Error(ex, "Error completing channel writer during pipeline suspension | CUST ID: {Id}", customerId);
+                    _log.Error(ex, "Error completing channel writer during pipeline suspension | INTEG ID: {Id}", integrationId);
                 }
             }
             // SECONDARY CHECK: If a thread was blocked on _initLock, it might have just finished 
             // adding a "stale" pipeline to the registry. Remove it again.
-            if (_registry.TryRemove(customerId, out var stalePipeline))
+            if (_registry.TryRemove(integrationId, out var stalePipeline))
             {
                 try
                 {
-                    _traceLog.Trace($"Stale pipeline previously added to registry - removed it here | CUST ID: {customerId}");
+                    _traceLog.Trace($"Stale pipeline previously added to registry - removed it here | INTEG ID: {integrationId}");
                     // Forces the ChannelDispatcher loop to break execution processing naturally
-                    _traceLog.Trace($"Completing the existing STALE pipeline channel writer | CUST ID: {customerId}");
+                    _traceLog.Trace($"Completing the existing STALE pipeline channel writer | INTEG ID: {integrationId}");
                     stalePipeline.Writer.TryComplete();
                 }
                 catch (Exception ex)
                 {
-                    _log.Error(ex, "Error completing stale pipeline channel writer during pipeline suspension | CUST ID: {Id}", customerId);
+                    _log.Error(ex, "Error completing stale pipeline channel writer during pipeline suspension | INTEG ID: {Id}", integrationId);
                 }
             }
 
             // Kick off the asynchronous self-healing cooldown task
             // We discard the Task return object ('_ =') because this is designed as fire-and-forget.
-            _traceLog.Trace($"Starting cooldown period before attempting to resume the customer | CUST ID: {customerId}");
-            _ = AutoResumeAfterCooldownAsync(customerId, TimeSpan.FromSeconds(_optMon.CurrentValue.EgressSettings.CircuitBreakerCooldownSeconds));
+            _traceLog.Trace($"Starting cooldown period before attempting to resume the customer | INTEG ID: {integrationId}");
+            _ = AutoResumeAfterCooldownAsync(integrationId, TimeSpan.FromSeconds(_optMon.CurrentValue.EgressSettings.CircuitBreakerCooldownSeconds));
         }
 
         /// <summary>
         /// Non-blocking, stateless timer that handles auto-recovery.
         /// </summary>
-        public async Task AutoResumeAfterCooldownAsync(string customerId, TimeSpan cooldown)
+        public async Task AutoResumeAfterCooldownAsync(long integrationId, TimeSpan cooldown)
         {
             try
             {
                 // Delay using the host application lifetime token so we don't block shutdowns
                 await Task.Delay(cooldown, _ct);
 
-                if (_suspendedCustomers.ContainsKey(customerId))
+                if (_suspendedIntegrations.ContainsKey(integrationId))
                 {
-                    _log.Warn("Circuit breaker cooldown elapsed for Customer - Attempting automatic self-healing. | CUST ID: {Id}", customerId);
-                    ResumeCustomer(customerId);
+                    _log.Warn("Circuit breaker cooldown elapsed for Customer - Attempting automatic self-healing. | INTEG ID: {Id}", integrationId);
+                    ResumeIntegration(integrationId);
                 }
             }
             catch (OperationCanceledException)
             {
                 // Host application is shutting down; ignore and let the task exit cleanly
-                _log.Warn($"Application is shutting down during customer cooldown - ignoring | CUST ID: {customerId}");
+                _log.Warn($"Application is shutting down during customer cooldown - ignoring | INTEG ID: {integrationId}");
             }
             catch (Exception ex)
             {
-                _log.Error(ex, "Uncaught error during the circuit breaker recovery delay | CUST ID: {Id}.", customerId);
+                _log.Error(ex, "Uncaught error during the circuit breaker recovery delay | INTEG ID: {Id}.", integrationId);
             }
         }
 
         /// <summary>
         /// Invoked by your administration tier or dashboard event receiver when a customer re-enables their endpoint.
-        /// </summary>
-        public void ResumeCustomer(string customerId)
+        /// </summary
+        public void ResumeIntegration(long integrationId)
         {
-            if (_suspendedCustomers.TryRemove(customerId, out _))
+            if (_suspendedIntegrations.TryRemove(integrationId, out _))
             {
                 // CRITICAL: Ensure no remnants of the "Completed" channel remain 
                 // in the dictionary before allowing new ingestion.
-                if (_registry.TryRemove(customerId, out var _))
+                if (_registry.TryRemove(integrationId, out var _))
                 {
-                    _log.Info("Customer resume: Purging stale, completed pipeline | CUST ID: {Id}", customerId);
+                    _log.Info("Integration resume: Purging stale, completed pipeline | INTEG ID: {Id}", integrationId);
                 }
                 
-                _log.Info("Circuit Breaker Reset. Resuming ingestion paths for Customer | CUST ID: {Id}.", customerId);
+                _log.Info("Circuit Breaker Reset. Resuming ingestion paths for Integration | INTEG ID: {Id}.", integrationId);
             }
         }
     
-        public bool IsSuspended(string customerId)
+        public bool IsSuspended(long integrationId)
         {
-            return _suspendedCustomers.ContainsKey(customerId);
+            return _suspendedIntegrations.ContainsKey(integrationId);
         }
 
-        public void ResetPipeline(string customerId)
+        public void ResetPipeline(long integrationId)
         {
             // Attempt to remove the existing pipeline from the registry
-            if (_registry.TryRemove(customerId, out var oldPipeline))
+            if (_registry.TryRemove(integrationId, out var oldPipeline))
             {
-                _log.Info("Resetting pipeline for customer - Disposing resources | CUST ID: {Id}", customerId);
+                _log.Info("Resetting pipeline for integration - Disposing resources | INTEG ID: {Id}", integrationId);
 
                 // Safely complete the writer if it isn't already
                 // This signals to any downstream consumers that no more data is coming
@@ -251,5 +253,6 @@ namespace Damper.Infrastructure.DeliveryChannels
                 }
             }
         }
+
     }
 }

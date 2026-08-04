@@ -1,15 +1,15 @@
 namespace Damper.Domain.Integrations
 {
     public sealed class IngressEndpoint
-{
-    public Guid Id { get; init; }
+    {
+        public long Id { get; init; }
 
-    public string Name { get; init; } = string.Empty;
+        public string Name { get; init; } = string.Empty;
 
-    public bool Enabled { get; init; } = true;
+        public bool Enabled { get; init; } = true;
 
-    public Guid WebhookRouteId { get; init; }
+        public long MessageRouteId { get; init; }
 
-    public IngressAuthentication Authentication { get; init; } = new();
-}
+        public IngressAuthentication Authentication { get; init; } = new();
+    }
 }

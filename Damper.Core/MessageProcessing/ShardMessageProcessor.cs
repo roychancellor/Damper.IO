@@ -1,5 +1,6 @@
 using System.Text;
 using System.Threading.Channels;
+using Damper.Domain.Common;
 using Damper.Infrastructure.ChannelRegistry;
 using Damper.Infrastructure.Logging;
 using Damper.Infrastructure.MessageTransport;
@@ -9,7 +10,8 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.ObjectPool;
 using Microsoft.Extensions.Options;
 using RabbitMQ.Client.Events;
-namespace Damper.Core.OutboundService
+
+namespace Damper.Core.MessageProcessing
 {
     public class ShardMessageProcessor : IShardMessageProcessor
     {
@@ -44,64 +46,73 @@ namespace Damper.Core.OutboundService
                     await context.RejectAsync(eventArgs.DeliveryTag, requeue: false);
                     return;
                 }
-                var customerId = amqpHeaders.GetStringHeader(DamperConstants.X_DAMPER_CUSTOMER_ID);
+                // Metadata about the message comes from the RabbitMQ message headers
+                var correlationId = new CorrelationId(amqpHeaders.GetStringHeader(DamperConstants.X_DAMPER_CORRELATION_ID));
+                var apiKey = new ApiKey(amqpHeaders.GetStringHeader(DamperConstants.REQUEST_X_DAMPER_API_KEY));
+                var integIdStr = amqpHeaders.GetStringHeader(DamperConstants.X_DAMPER_INTEGRATION_ID);
+                var integId = Convert.ToInt64(integIdStr);
+                var integName = new IntegrationName(amqpHeaders.GetStringHeader(DamperConstants.X_DAMPER_INTEGRATION_NAME));
                 var destinationUrl = amqpHeaders.GetStringHeader(DamperConstants.X_DAMPER_DESTINATION_URL);
-                var correlationId = amqpHeaders.GetStringHeader(DamperConstants.X_DAMPER_CORRELATION_ID);
-
-                // Allow NLog to automatically populate the Correlation Id in every log statement in this method beyond this point
-                using var correlationScope = _log.BeginCorrelationScope(correlationId);
-
                 int attemptCount = amqpHeaders.TryGetValue(DamperConstants.X_DAMPER_ATTEMPT_COUNT, out var attemptObj)
                                    ? Convert.ToInt32(attemptObj)
                                    : 1;
 
-                _traceLog.Trace($"Retrieved message headers | CUST ID: {customerId} | DEST URL: {destinationUrl} | CORR ID: {correlationId} | ATTEMPT: {attemptCount}");
+                // Allow NLog to automatically populate transaction metadata in every log statement within this method beyond this point
+                using var correlationScope = _log.BeginCorrelationScope(correlationId.Value, integId, integName.Value);
+
+                _traceLog.Trace($"Retrieved message headers | CORR ID: {correlationId} | API KEY: REDACTED | INTEG ID: {integId} | INTEG NAME: {integName} | DEST URL: {destinationUrl} | ATTEMPT: {attemptCount}");
+                
+                _traceLog.Trace($"Getting HTTP headers for the original request from the Rabbit MQ headers");
                 var envelopeHeaders = GetEnvelopeHeaders(amqpHeaders);
 
-                _traceLog.Trace($"Building new WebhookEnvelope and settings is AckContext property (retrieved from pool)");
+                _traceLog.Trace($"Building new MessageEnvelope and settings is AckContext property (retrieved from pool)");
                 ackContext = _contextPool.Get();
                 ackContext.DeliveryTag = eventArgs.DeliveryTag;
                 ackContext.ShardIndex = context.ShardIndex;
                 ackContext.ShardContext = context;
-
+                
                 envelope = new MessageEnvelope
                 {
                     CorrelationId = correlationId,
-                    CustomerId = customerId,
+                    ApiKey = apiKey,
+                    IntegrationId = integId,
+                    IntegrationName = integName,
                     DestinationUrl = destinationUrl,
                     Headers = envelopeHeaders,
                     AttemptCount = attemptCount,
                     ReceivedAt = DateTime.UtcNow,
                     RawPayloadBytes = eventArgs.Body,
-                    AckContext = ackContext
+                    AckContext = ackContext,
+                    CancelToken = context.StoppingToken,
+                    ShouldThrow = true,
                 };
 
-                _traceLog.Trace($"Getting customer channel | CUST ID: {envelope.CustomerId} | DEL TAG: {eventArgs.DeliveryTag}");
-                var pipeline = await _channelRegistry.GetOrCreatePipelineAsync(envelope.CustomerId);
+                _traceLog.Trace($"Getting message delivery channel | DEL TAG: {eventArgs.DeliveryTag}");
+                var pipeline = await _channelRegistry.GetOrCreatePipelineAsync(integId);
 
-                _traceLog.Trace($"Attempting non-blocking write to customer channel | CUST ID: {envelope.CustomerId} | DEL TAG: {eventArgs.DeliveryTag}");
+                _traceLog.Trace($"Attempting non-blocking write to delivery channel | DEL TAG: {eventArgs.DeliveryTag}");
 
                 var canWrite = await pipeline.Writer.WaitToWriteAsync(
-                                new CancellationTokenSource(_optMon.CurrentValue.ProcessorSettings.WaitToWriteExpirationMillis).Token);
+                                        new CancellationTokenSource(_optMon.CurrentValue.ProcessorSettings.WaitToWriteExpirationMillis).Token);
                 if (canWrite && !pipeline.BackgroundTask.IsCompleted && pipeline.Writer.TryWrite(envelope))
                 {
                     // DO NOT ACK HERE!!! LET THE CHANNEL DISPATCHER HANDLE THE ACK WHEN IT KNOWS THE OUTCOME
-                    _traceLog.Trace($"<==== ProcessMessageAsync: Successfully enqueued envelope in channel | CUST ID: {envelope.CustomerId} | DELIVERY TAG: {eventArgs.DeliveryTag}");
-                    _log.Info($"<==== Successfully enqueued envelope in channel | CUST ID: {envelope.CustomerId} | DELIVERY TAG: {eventArgs.DeliveryTag}");
+                    _traceLog.Trace($"<==== ProcessMessageAsync: Successfully enqueued envelope in channel | DELIVERY TAG: {eventArgs.DeliveryTag}");
+                    _log.Info($"<==== Successfully enqueued envelope in channel | DELIVERY TAG: {eventArgs.DeliveryTag}");
                 }
                 else
                 {
                     // Covers every reason we couldn't hand off: suspended (sentinel writer),
                     // buffer full, or a genuinely dead/crashed pipeline - all get parked for
                     // delayed automatic retry instead of an immediate, unthrottled NACK.
-                    if (pipeline.BackgroundTask.IsCompleted && !_channelRegistry.IsSuspended(envelope.CustomerId))
+                    if (pipeline.BackgroundTask.IsCompleted && !_channelRegistry.IsSuspended(integId))
                     {
-                        _log.Warn("<==== Pipeline crashed for customer - Resetting registry. | CUST ID: {Id}", envelope.CustomerId);
-                        _channelRegistry.ResetPipeline(envelope.CustomerId);
+                        _log.Warn("<==== Pipeline crashed for delivery channel - Resetting registry.");
+                        _channelRegistry.ResetPipeline(integId);
                     }
                     else
                     {
-                        _log.Warn("<==== Customer buffer full or suspended - Parking message for delayed retry | CUST ID: {Id} | SHARD: {Idx}.", envelope.CustomerId, context.ShardIndex);
+                        _log.Warn("<==== Delivery buffer full or suspended - Parking message for delayed retry | SHARD: {Idx}.", context.ShardIndex);
                     }
 
                     DamperMetrics.ParkedForRetryCounter.Add(1);
@@ -117,13 +128,13 @@ namespace Damper.Core.OutboundService
             }
             catch (ChannelClosedException)
             {
-                _log.Warn("<==== Attempted to write to a closed channel for customer - resuming customer | CUST ID: {Id}.", envelope.CustomerId);
-                _channelRegistry.ResumeCustomer(envelope.CustomerId);
+                _log.Warn("<==== Attempted to write to a closed channel for integration - resuming integration");
+                _channelRegistry.ResumeIntegration(envelope.IntegrationId);
                 throw;
             }
             catch (OperationCanceledException)
             {
-                _log.Warn($"<==== ShardMessageProcessor: Shutdown requested | SHARD: {context.ShardIndex}");
+                _log.Warn("<==== ShardMessageProcessor: Shutdown requested | SHARD: {Idx}", context.ShardIndex);
                 return;
             }
             catch (Exception ex)

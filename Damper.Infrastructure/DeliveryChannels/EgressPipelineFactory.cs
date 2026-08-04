@@ -1,4 +1,5 @@
 using System.Threading.Channels;
+using Damper.Domain.Integrations;
 using Damper.Infrastructure.CustomerChannels;
 using Damper.Infrastructure.Logging;
 using Damper.Infrastructure.MessageTransport;
@@ -30,11 +31,11 @@ namespace Damper.Infrastructure.DeliveryChannels
             _optMon = optMon;
         }
 
-        public EgressPipeline CreatePipeline(CustomerConfig customerConfig, Action<string> onSuspensionTriggered, CancellationToken ct)
+        public EgressPipeline CreatePipeline(Integration integration, Action<long> onSuspensionTriggered, CancellationToken ct)
         {
-            var bufferSize = customerConfig.MaxQueueCapacity > 0
-                           ? customerConfig.MaxQueueCapacity
-                           : _optMon.CurrentValue.RabbitMqSettings.DefaultMaxQueueCapacity;
+            var bufferSize = integration.Route.Delivery.MaxQueueCapacity > 0
+                           ? integration.Route.Delivery.MaxQueueCapacity
+                           : _optMon.CurrentValue.RabbitMqSettings.DefaultMaxQueueCapacity; // TODO: Figure out a better default mechanism
             
             var channelOptions = new BoundedChannelOptions(bufferSize)
             {
@@ -54,7 +55,7 @@ namespace Damper.Infrastructure.DeliveryChannels
                     var dispatcher = new ChannelDispatcher(_optMon,
                                                            _httpClientFactory,
                                                            onSuspensionTriggered,
-                                                           customerConfig,
+                                                           integration,
                                                            channel.Reader,
                                                            _scopeFactory,
                                                            _contextPool,
@@ -65,19 +66,19 @@ namespace Damper.Infrastructure.DeliveryChannels
                 catch (OperationCanceledException ocex) 
                 { 
                     tcs.SetException(ocex);
-                    _log.Info($"Dispatcher loop cancelled for customer | CUST ID: {customerConfig.CustomerId}"); 
+                    _log.Info($"Dispatcher loop cancelled for integration | INTEG ID: {integration.Id}"); 
                 }
                 catch (Exception ex) 
                 {
                     // CRITICAL: If the loop dies, the pipeline is effectively broken.
-                    // Log and trigger a failure state for the customer.
-                    _log.Error(ex, $"CRITICAL: Dispatcher loop faulted for customer | CUST ID: {customerConfig.CustomerId}");
+                    // Log and trigger a failure state for the integration.
+                    _log.Error(ex, $"CRITICAL: Dispatcher loop faulted for integration | INTEG ID: {integration.Id}");
                     tcs.SetException(ex);
                     
                     // CRITICAL: Close the valve so no more messages can be 'lost'
                     channel.Writer.TryComplete(ex);
                     
-                    onSuspensionTriggered(customerConfig.CustomerId); 
+                    onSuspensionTriggered(integration.Id); 
                 }
             }, ct);
 

@@ -2,16 +2,20 @@ namespace Damper.Domain.Integrations
 {
     public sealed class DeliverySettings
     {
-        public int RequestsPerSecond { get; init; }
+        public int RequestsPerInterval { get; init; }
+        
+        public int DeliveryIntervalMillis { get; set; }
 
         public int MaxRetryAttempts { get; init; }
 
-        public TimeSpan InitialRetryDelay { get; init; }
+        public int InitialRetryDelayMillis { get; init; }
 
         public double RetryBackoffMultiplier { get; init; }
 
-        public TimeSpan MaximumRetryDelay { get; init; }
+        public long MaximumRetryDelayMillis { get; init; }
 
-        public TimeSpan RequestTimeout { get; init; }
+        public int RequestTimeoutMillis { get; init; }
+        
+        public int MaxQueueCapacity { get; set; }
     }
 }

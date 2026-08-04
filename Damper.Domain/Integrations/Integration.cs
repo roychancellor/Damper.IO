@@ -1,8 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
-
 namespace Damper.Domain.Integrations
 {
     /*
@@ -28,7 +23,7 @@ namespace Damper.Domain.Integrations
     */
     public sealed class Integration
     {
-        public Guid Id { get; init; }
+        public long Id { get; init; }
 
         public string Name { get; init; } = string.Empty;
 

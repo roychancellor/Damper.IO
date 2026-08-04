@@ -1,3 +1,5 @@
+using Damper.Domain.Common;
+using Damper.Domain.Integrations;
 using Damper.Infrastructure.ReferenceData;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
@@ -18,15 +20,14 @@ public class CachedIntegrationRepository : IIntegrationRepository
         _optMon = optMon;
     }
 
-    public async Task<CustomerConfig?> GetByIdAsync(string customerId, CancellationToken ct)
+    public async Task<Integration?> GetByIdAsync(long integrationId, CancellationToken ct)
     {
-        string cacheKey = CacheKey(customerId);
-        CustomerConfig? cachedConfig;
+        string cacheKey = CacheKey(integrationId);
 
-        // Look for the config in cache first - if it's there, get out of here!
-        if (_memoryCache.TryGetValue(cacheKey, out cachedConfig))
+        // Look for the integration in cache first - if it's there, get out of here!
+        if (_memoryCache.TryGetValue(cacheKey, out Integration? cachedInteg))
         {
-            return cachedConfig;
+            return cachedInteg;
         }
 
         // Cache miss: Go fetch from the durable repository using single flight pattern
@@ -35,12 +36,12 @@ public class CachedIntegrationRepository : IIntegrationRepository
         try
         {
             // Try the cache again in case another thread put it in there - if it hits, get out of here!
-            if (_memoryCache.TryGetValue(cacheKey, out cachedConfig))
+            if (_memoryCache.TryGetValue(cacheKey, out cachedInteg))
             {
-                return cachedConfig;
+                return cachedInteg;
             }
             
-            var realConfig = await _durableRepo.GetByIdAsync(customerId, ct)
+            var realConfig = await _durableRepo.GetByIdAsync(integrationId, ct)
                                                .ConfigureAwait(continueOnCapturedContext: false);
             if (realConfig != null)
             {
@@ -68,15 +69,76 @@ public class CachedIntegrationRepository : IIntegrationRepository
         return TimeSpan.FromMinutes(_optMon.CurrentValue.RepositorySettings.CacheTimeToLiveMinutes);
     }
 
-    public void Invalidate(string customerId)
+    public void Invalidate(long integrationId)
     {
-        _memoryCache.Remove(CacheKey(customerId));
+        _memoryCache.Remove(CacheKey(integrationId));
     }
 
-    public void Update(string customerId, CustomerConfig config)
+    public void Update(long integrationId, Integration config)
     {
-        _memoryCache.Set(CacheKey(customerId), config, GetCacheTimeToLive());
+        _memoryCache.Set(CacheKey(integrationId), config, GetCacheTimeToLive());
     }
 
-    private static string CacheKey(string customerId) => $"customer-{customerId}";
+    private static string CacheKey(long integrationId) => $"integration-{integrationId}";
+    private static string CacheKey(string apiKey) => $"apikey-{apiKey}";
+
+    // TODO: Implement the repository methods
+    public async Task<Integration?> GetByApiKeyAsync(ApiKey apiKey, CancellationToken ct = default)
+    {
+        string cacheKey = CacheKey(apiKey.Value);
+
+        // Look for the integration in cache first - if it's there, get out of here!
+        if (_memoryCache.TryGetValue(cacheKey, out Integration? cachedInteg))
+        {
+            return cachedInteg;
+        }
+
+        // Cache miss: Go fetch from the durable repository using single flight pattern
+        var sem = _locks.GetOrAdd(cacheKey, _ => new SemaphoreSlim(1, 1));
+        await sem.WaitAsync(CancellationToken.None);
+        try
+        {
+            // Try the cache again in case another thread put it in there - if it hits, get out of here!
+            if (_memoryCache.TryGetValue(cacheKey, out cachedInteg))
+            {
+                return cachedInteg;
+            }
+            
+            var realConfig = await _durableRepo.GetByApiKeyAsync(apiKey, ct)
+                                               .ConfigureAwait(continueOnCapturedContext: false);
+            if (realConfig != null)
+            {
+                // Add to cache with an absolute expiration window
+                _memoryCache.Set(cacheKey, realConfig, GetCacheTimeToLive());
+            }
+            return realConfig;
+        }
+        finally
+        {
+            sem.Release();
+            // Try to remove the semaphore if no one else is waiting to avoid unbounded growth.
+            // SemaphoreSlim.CurrentCount == 1 means it's not being waited upon (we created with 1, waited -> 0 -> released -> 1).
+            // This is a heuristic — races are possible but acceptable for cleanup.
+            if (sem.CurrentCount == 1)
+            {
+                _locks.TryRemove(cacheKey, out _);
+                sem.Dispose();
+            }
+        }
+    }
+
+    public Task<IReadOnlyCollection<Integration>> GetAllAsync(CancellationToken cancellationToken = default)
+    {
+        throw new NotImplementedException();
+    }
+
+    public Task SaveAsync(Integration integration, CancellationToken cancellationToken = default)
+    {
+        throw new NotImplementedException();
+    }
+
+    public Task DeleteAsync(long integrationId, CancellationToken cancellationToken = default)
+    {
+        throw new NotImplementedException();
+    }
 }

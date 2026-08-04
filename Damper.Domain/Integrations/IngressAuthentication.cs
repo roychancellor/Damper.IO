@@ -1,11 +1,9 @@
-using Damper.Domain.Enums;
+using Damper.Domain.Common;
 
 namespace Damper.Domain.Integrations
 {
     public sealed class IngressAuthentication
     {
-        public AuthenticationType Type { get; init; }
-
-        public string Secret { get; init; } = string.Empty;
+        public ApiKey ApiKey { get; set; }
     }
 }

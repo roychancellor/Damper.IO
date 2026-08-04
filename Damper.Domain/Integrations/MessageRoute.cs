@@ -2,7 +2,7 @@ namespace Damper.Domain.Integrations
 {
     public sealed class MessageRoute
 {
-    public Guid Id { get; init; }
+    public long Id { get; init; }
 
     public string Name { get; init; } = string.Empty;
 

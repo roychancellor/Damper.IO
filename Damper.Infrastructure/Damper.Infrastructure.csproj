@@ -12,4 +12,7 @@
     <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.9" />
     <PackageReference Include="RabbitMQ.Client" Version="7.2.1" />
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Damper.Domain\Damper.Domain.csproj" />
+  </ItemGroup>
 </Project>

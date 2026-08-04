@@ -1,16 +1,14 @@
-using System.Threading.Channels;
 using Damper.Infrastructure.CustomerChannels;
-using Damper.Infrastructure.Models;
 
 namespace Damper.Infrastructure.ChannelRegistry
 {
     public interface IChannelRegistry
     {
-        Task<EgressPipeline> GetOrCreatePipelineAsync(string customerId);
-        void MarkAsSuspended(string customerId);
-        Task AutoResumeAfterCooldownAsync(string customerId, TimeSpan cooldown);
-        void ResumeCustomer(string customerId);
-        bool IsSuspended(string customerId);
-        void ResetPipeline(string customerId);
+        Task<EgressPipeline> GetOrCreatePipelineAsync(long integrationId);
+        void MarkAsSuspended(long integrationId);
+        Task AutoResumeAfterCooldownAsync(long integrationId, TimeSpan cooldown);
+        void ResumeIntegration(long integrationId);
+        bool IsSuspended(long integrationId);
+        void ResetPipeline(long integrationId);
     }
 }

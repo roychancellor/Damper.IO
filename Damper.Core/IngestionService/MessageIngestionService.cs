@@ -14,12 +14,12 @@ public class MessageIngestionService : IMessageIngestionService
 
     private readonly IHostApplicationLifetime _appLifetime;
     
-    private readonly IIntegrationRepository _customerRepo;
+    private readonly IIntegrationRepository _integRepo;
     private readonly IQueuePublisher _queuePublisher;
 
-    public MessageIngestionService(IIntegrationRepository tenantRepo, IQueuePublisher queuePublisher, IHostApplicationLifetime appLifetime)
+    public MessageIngestionService(IIntegrationRepository integRepo, IQueuePublisher queuePublisher, IHostApplicationLifetime appLifetime)
     {
-        _customerRepo = tenantRepo;
+        _integRepo = integRepo;
         _queuePublisher = queuePublisher;
         _appLifetime = appLifetime;
     }
@@ -34,16 +34,17 @@ public class MessageIngestionService : IMessageIngestionService
             _log.Error(msg);
             return Result<string>.Failure(ErrorType.ServerError, msg);
         }
-        var customerId = rw.CustomerId;
-        var correlationId = rw.CorrelationId;
+        var apiKey = rw.ApiKey;
+        var corrId = rw.CorrelationId;
 
-        _log.Info($"====> New webhook request received | CUSTOMER: {customerId}");
-        _traceLog.Trace($"Getting customer config from repo | CUST ID: {customerId}");
-        var customerConfig = await _customerRepo.GetByIdAsync(customerId, rw.CancelToken);
-        if (customerConfig == null)
+        _log.Info($"====> New webhook request received | CORRELATION ID: {corrId}");
+        _traceLog.Trace($"Getting integration from repo by API KEY (REDACTED)");
+        var integration = await _integRepo.GetByApiKeyAsync(apiKey, rw.CancelToken);
+        if (integration == null)
         {
-            return rw.SetError($"Customer configuration is missing or corrupted", ErrorType.ServerError).LogAndGenerateFailureResult();
+            return rw.SetError($"Integration is missing or repository is corrupted", ErrorType.ServerError).LogAndGenerateFailureResult();
         }
+        _traceLog.Trace($"Integration retrieved | INTEG ID: {integration.Id} | NAME: {integration.Name}");
 
         // Verify the Content-Type header is parsable as a known type, as the dispatcher needs it to be correct
         // to send a valid request to the customer. Checking here allows for HTTP 400 if it is not parsable.
@@ -63,44 +64,45 @@ public class MessageIngestionService : IMessageIngestionService
 
         var httpHeaderDictionary = rw.HttpHeaders.ToDictionary(h => h.Key, h => h.Value.ToString());
 
-        _traceLog.Trace($"Building Webhook Envelope");
-        var toPublishEnvelope = MessageEnvelope
-                                .BuildBase(rw)
-                                .SetDestination(customerConfig.DestinationURL)
-                                .SetPayload(rawBodyBytes)
-                                .SetHeaders(httpHeaderDictionary);
-        if (toPublishEnvelope == null || toPublishEnvelope.RawPayloadBytes.IsEmpty)
-        {
-            return rw.SetError("Webhook Envelope to publish is null or empty of content", ErrorType.BadRequest).LogAndGenerateFailureResult();
-        }
-
-        // By business decision, we are passing a combined token that will prevent publishing if the HTTP request
+        // By business decision, we are passing a combined token that will prevent publishing if the ingress HTTP request
         // is canceled OR if the application shuts down. In either case, the webhook providers will not receive
         // a success status code and will retry.
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(rw.CancelToken, _appLifetime.ApplicationStopping);
+
+        // Mental model: The actual payload published to the queue is the bytes of the RawBodyBytes
+        // of the MessageEnvelope. The rest is metadata placed in message headers for transport.
+        // This eliminates the need for serialization/deserialization to preserve the original
+        // payload byte-for-byte.
+        _traceLog.Trace($"Building Message Envelope");
+        var toPublishEnvelope = MessageEnvelope
+                                .BuildBase(rw, linkedCts.Token, shouldThrow: true)
+                                .SetDestination(integration.Route.Target.Uri.OriginalString)
+                                .SetPayload(rawBodyBytes)
+                                .SetHeaders(httpHeaderDictionary)
+                                .SetIntegrationId(integration.Id)
+                                .SetIntegrationName(integration.Name);
+        if (toPublishEnvelope == null || toPublishEnvelope.RawPayloadBytes.IsEmpty)
+        {
+            return rw.SetError("Message Envelope to publish is null or empty of content", ErrorType.BadRequest).LogAndGenerateFailureResult();
+        }
+
         try
         {
-            _traceLog.Trace($"Building Publish Wrapper and publishing to queue");
-            var pw = PublishWrapper
-                     .BuildBase(linkedCts.Token, shouldThrow: true)
-                     .SetCorrelationID(correlationId)
-                     .SetCustomerID(customerId)
-                     .SetPayload(toPublishEnvelope);
-            
-            if (!await _queuePublisher.TryPublishAsync(pw))
+            _traceLog.Trace($"Publishing to message exchange");
+            if (!await _queuePublisher.TryPublishAsync(toPublishEnvelope))
             {
-                return rw.SetError("Unable to publish ingested webhook payload to message broker", ErrorType.ServerError).LogAndGenerateFailureResult();
+                return rw.SetError("Unable to publish ingested message payload to message exchange", ErrorType.ServerError).LogAndGenerateFailureResult();
             }
         }
         catch (OperationCanceledException) when (_appLifetime.ApplicationStopping.IsCancellationRequested)
         {
-            _log.Warn($"Publish aborted for customer {customerId} due to application shutdown sequence.");
+            _log.Warn($"Publish aborted for correlation ID {corrId.Value} due to application shutdown sequence.");
             throw;
         }
 
         // Success! Return a tracking ID (correlation ID) back to the API
-        _traceLog.Trace($"<==== ProcessIngressAsync FINISHED | CUSTOMER: {customerId}");
-        _log.Info($"<==== Webhook request ingested and published | CUSTOMER: {customerId}");
-        return Result<string>.Success(correlationId);
+        _traceLog.Trace($"<==== ProcessIngressAsync FINISHED | CORRELATION ID: {corrId.Value} | INTEG ID: {integration.Id} | NAME: {integration.Name}");
+        _log.Info($"<==== Message request ingested and published | CORRELATION ID: {corrId.Value} | INTEG ID: {integration.Id} | NAME: {integration.Name}");
+        return Result<string>.Success(corrId.Value);
     }
 }

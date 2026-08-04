@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Threading.Channels;
+using Damper.Domain.Integrations;
 using Damper.Infrastructure.CustomerChannels;
 using Damper.Infrastructure.Logging;
 using Damper.Infrastructure.MessageTransport;
@@ -19,25 +20,25 @@ namespace Damper.Infrastructure.DeliveryChannels
         private static readonly ILogger _log = Loggers.Request;
         private static readonly ILogger _traceLog = Loggers.RequestTrace;
 
-        private static bool SUCCESS = true;
-        private static bool FAILURE = false;
-        private static bool KEEP_ALIVE = true;
+        private const bool SUCCESS = true;
+        private const bool FAILURE = false;
+        private const bool KEEP_ALIVE = true;
         
         private readonly IOptionsMonitor<AppSettings> _optMon;
         private readonly IHttpClientFactory _httpClientFactory;
-        private readonly Action<string> _onSuspensionTriggered;
-        private readonly string _customerId;
+        private readonly Action<long> _onSuspensionTriggered;
+        private readonly long _integrationId;
         private readonly ChannelReader<MessageEnvelope> _reader;
         private readonly IServiceScopeFactory _scopeFactory; // The standard lifecycle bridge
         private readonly ObjectPool<MessageAckContext> _contextPool;
         private readonly CancellationToken _ct;
-        private CustomerConfig _custConfig;
+        private Integration _integration;
 
         public ChannelDispatcher(
             IOptionsMonitor<AppSettings> optMon,
             IHttpClientFactory httpClientFactory, 
-            Action<string> onSuspensionTriggered, 
-            CustomerConfig initialConfig, 
+            Action<long> onSuspensionTriggered, 
+            Integration initialIntegration, 
             ChannelReader<MessageEnvelope> reader, 
             IServiceScopeFactory scopeFactory,
             ObjectPool<MessageAckContext> contextPool,
@@ -46,8 +47,8 @@ namespace Damper.Infrastructure.DeliveryChannels
             _optMon = optMon;
             _httpClientFactory = httpClientFactory;
             _onSuspensionTriggered = onSuspensionTriggered;
-            _custConfig = initialConfig;
-            _customerId = initialConfig.CustomerId;
+            _integration = initialIntegration;
+            _integrationId = initialIntegration.Id;
             _reader = reader;
             _scopeFactory = scopeFactory;
             _contextPool = contextPool;
@@ -70,9 +71,9 @@ namespace Damper.Infrastructure.DeliveryChannels
 
                     // Drain up to the maximum burst capacity allowed for this interval window
                     // or until there are no more messages to read
-                    while (messagesInBatch.IsBelowCustomerRate(_custConfig) && _reader.TryRead(out var envelope))
+                    while (messagesInBatch.IsBelowCustomerRate(_integration) && _reader.TryRead(out var envelope))
                     {
-                        deliveryTasks.Add(DeliverWebhookWithRetryAsync(envelope, _custConfig, ct));
+                        deliveryTasks.Add(DeliverMessageWithRetryAsync(envelope, _integration, ct));
                         messagesInBatch++;
                     }
 
@@ -90,7 +91,7 @@ namespace Damper.Infrastructure.DeliveryChannels
                     if (deliveryResults.HasAtLeastOneError())
                     {
                         _traceLog.Trace($"Delivery tasks completed with error(s) | ERROR COUNT: {deliveryResults.Count(r => r == false)}");
-                        _log.Error("Circuit breaker triggered for Customer {Id} due to exhausted retry count.", _customerId);
+                        _log.Error("Circuit breaker triggered for Customer {Id} due to exhausted retry count.", _integrationId);
 
                         // Drain anything still buffered but unread - it was pulled off RabbitMQ and is unacked,
                         // but no delivery task will ever pick it up once this loop exits. Park it for automatic
@@ -99,7 +100,7 @@ namespace Damper.Infrastructure.DeliveryChannels
                         {
                             await leftover.FinalizeParkAsync(_contextPool);
                         }
-                        _onSuspensionTriggered(_customerId);
+                        _onSuspensionTriggered(_integrationId);
                         return;
                     }
 
@@ -109,7 +110,7 @@ namespace Damper.Infrastructure.DeliveryChannels
                     {
                         _traceLog.Trace($"There are new messages but waiting for the configured delivery time for a predictable recovery window.");
                         // Guarantees a true, predictable recovery window between outbound bursts
-                        await Task.Delay(TimeSpan.FromMilliseconds(_custConfig.DeliveryIntervalMillis), ct);
+                        await Task.Delay(TimeSpan.FromMilliseconds(_integration.Route.Delivery.DeliveryIntervalMillis), ct);
                     }
 
                     // Sync configuration definitions once per processing cycle
@@ -120,18 +121,18 @@ namespace Damper.Infrastructure.DeliveryChannels
             {
                 // 1. Notify the Registry immediately (synchronously)
                 // The loop is done, so the registry MUST remove the reference now.
-                _onSuspensionTriggered(_customerId);
+                _onSuspensionTriggered(_integrationId);
 
                 // 2. Check for completion exceptions
                 // You can inspect the channel's completion status directly via the Reader
                 if (_reader.Completion.IsFaulted)
                 {
                     var exception = _reader.Completion.Exception?.Flatten();
-                    _log.Error("Channel pipeline faulted for Customer {Id}.", _customerId, exception);
+                    _log.Error("Channel pipeline faulted for Customer {Id}.", _integrationId, exception);
                 }
                 else
                 {
-                    _log.Info("Channel pipeline finalized for Customer {Id}.", _customerId);
+                    _log.Info("Channel pipeline finalized for Customer {Id}.", _integrationId);
                 }
             }
         }
@@ -140,47 +141,47 @@ namespace Damper.Infrastructure.DeliveryChannels
         {
             try
             {
-                _traceLog.Trace($"Refreshing customer configuration | CUST ID: {_customerId}");
+                _traceLog.Trace($"Refreshing customer configuration | INTEG ID: {_integrationId}");
 
                 using var scope = _scopeFactory.CreateScope();
                 var repo = scope.ServiceProvider.GetRequiredService<IIntegrationRepository>();
-                var freshConfig = await repo.GetByIdAsync(_customerId, ct);
+                var freshConfig = await repo.GetByIdAsync(_integrationId, ct);
 
                 if (freshConfig != null)
                 {
-                    _custConfig = freshConfig;
+                    _integration = freshConfig;
                 }
             }
             catch (Exception ex)
             {
                 // Do not crash the entire consumer if the repository is temporarily down
-                _log.Warn("Failed to refresh pacing configuration for customer {CustomerId}. Maintaining last known state.", _customerId, ex);
+                _log.Warn("Failed to refresh pacing configuration for customer {CustomerId}. Maintaining last known state.", _integrationId, ex);
             }
         }
         
-        public async Task<bool> DeliverWebhookWithRetryAsync(MessageEnvelope envelope, CustomerConfig custConfig, CancellationToken ct)
+        public async Task<bool> DeliverMessageWithRetryAsync(MessageEnvelope envelope, Integration integration, CancellationToken ct)
         {
             try
             {
-                // Allow NLog to automatically populate the Correlation Id in every log statement in this method
-                using var correlationScope = _log.BeginCorrelationScope(envelope.CorrelationId);
+                // Allow NLog to automatically populate tracking metadata in every log statement withinin this method
+                using var correlationScope = _log.BeginCorrelationScope(envelope.CorrelationId.Value, envelope.IntegrationId, envelope.IntegrationName.Value);
 
-                _traceLog.Debug($"DeliverWebhookWithRetryAsync starting | CUST ID: {envelope.CustomerId} | DEST: {envelope.DestinationUrl}");
+                _traceLog.Debug($"DeliverWebhookWithRetryAsync starting | DEST: {envelope.DestinationUrl}");
                 
-                var maxAttempts = _optMon.CurrentValue.EgressSettings.MaxSendAttempts;
-                var retryBackoff = TimeSpan.FromMilliseconds(_optMon.CurrentValue.EgressSettings.RetryBackoffMillis);
+                var maxAttempts = integration.Route.Delivery.MaxRetryAttempts;
+                var retryBackoff = TimeSpan.FromMilliseconds(integration.Route.Delivery.InitialRetryDelayMillis);
 
                 while (envelope.HasAttemptsRemaining(maxAttempts))
                 {
                     var client = _httpClientFactory.CreateClient(_optMon.CurrentValue.EgressSettings.HttpClientName);
 
-                    using var httpRequest = envelope.BuildHttpRequest(custConfig);
+                    using var httpRequest = envelope.BuildHttpRequest(integration);
 
                     _traceLog.Debug("Getting all HTTP headers ready for request");
                     httpRequest.AddOriginalRequestHeaders(envelope, _optMon.CurrentValue.EgressSettings.SystemHeaders);
                     if (!httpRequest.TryHandleContentTypeHeader(envelope))
                     {
-                        _log.Fatal($"Content-Type header is not parsable - rejecting to DLQ | CUST ID: {envelope.CustomerId} | CORR ID: {envelope.CorrelationId}");
+                        _log.Fatal($"Content-Type header is not parsable - rejecting to DLQ");
                         DamperMetrics.SentToDeadLetter.Add(1);
                         await envelope.FinalizeRejectAsync(_contextPool);
                         return KEEP_ALIVE; // Keep the pipeline loop alive
@@ -189,45 +190,45 @@ namespace Damper.Infrastructure.DeliveryChannels
 
                     try
                     {
-                        _log.Info($"====> Sending envelope to customer | CUST ID: {envelope.CustomerId} | URL: {envelope.DestinationUrl}");
-                        _traceLog.Debug($"Sending HTTP POST request now | CUST ID: {envelope.CustomerId} | URL: {envelope.DestinationUrl}");
+                        _log.Info($"====> Sending envelope to destination | URL: {envelope.DestinationUrl}");
+                        _traceLog.Debug($"Sending HTTP POST request now | URL: {envelope.DestinationUrl}");
                         using var cts = CancellationTokenSource
                                         .CreateLinkedTokenSource(ct)
-                                        .SetRequestTimeout(_optMon.CurrentValue.EgressSettings.RequestTimeoutMillis);
+                                        .SetRequestTimeout(integration.Route.Delivery.RequestTimeoutMillis);
 
                         using var response = await client.SendAsync(httpRequest, cts.Token);
 
-                        _traceLog.Debug($"Response received | CUST ID: {envelope.CustomerId} | HTTP STATUS: {response.StatusCode}");
+                        _traceLog.Debug($"Response received | HTTP STATUS: {response.StatusCode}");
                         if (response.IsSuccessStatusCode)
                         {
-                            _log.Info($"<==== Customer returned SUCCESS | CUST ID: {envelope.CustomerId} | HTTP STATUS: {response.StatusCode}");
-                            DamperMetrics.DeliverySuccessCounter.Add(1, new KeyValuePair<string, object?>(DamperConstants.DAMPER_METER_CUSTOMER_ID, envelope.CustomerId));
+                            _log.Info($"<==== Destination returned SUCCESS | HTTP STATUS: {response.StatusCode}");
+                            DamperMetrics.DeliverySuccessCounter.Add(1, new KeyValuePair<string, object?>(DamperConstants.DAMPER_METER_INTEGRATION_NAME, envelope.IntegrationName));
                             await envelope.FinalizeAckAsync(_contextPool);
                             return SUCCESS;
                         }
 
                         if (response.StatusCode.Is4XX() && !response.StatusCode.IsTooManyRequests())
                         {
-                            _log.Fatal($"<==== Customer returned 4XX status code (not 429) - Sending to dead letter | CUST ID: {envelope.CustomerId} | HTTP STATUS: {response.StatusCode}");
-                            DamperMetrics.SentToDeadLetter.Add(1);
+                            _log.Fatal($"<==== Destination returned 4XX status code (not 429) - Sending to DLQ | HTTP STATUS: {response.StatusCode}");
+                            DamperMetrics.SentToDeadLetter.Add(1, new KeyValuePair<string, object?>(DamperConstants.DAMPER_METER_INTEGRATION_NAME, envelope.IntegrationName));
                             await envelope.FinalizeRejectAsync(_contextPool);
                             return KEEP_ALIVE; // Keep the pipeline loop alive
                         }
 
-                        _log.Warn($"<==== Customer request FAILED (try {envelope.AttemptCount}) - retrying with exponential backoff ({retryBackoff.Seconds} sec) | CUST ID: {envelope.CustomerId} | HTTP STATUS: {response.StatusCode}");
+                        _log.Warn($"<==== Destination request FAILED (try {envelope.AttemptCount}) - retrying with exponential backoff ({retryBackoff.Seconds} sec) | HTTP STATUS: {response.StatusCode}");
                         envelope.AttemptCount++;
                         retryBackoff = await DoExponentialBackoff(retryBackoff, ct);
                     }
                     catch (Exception ex)
                     {
-                        _log.Error("<==== Transient error delivering webhook for {Id}. Attempt {Attempt} - Executing retry with exponential backoff ", envelope.CustomerId, envelope.AttemptCount, ex);
+                        _log.Error("<==== Transient error delivering message for integration. Attempt {Attempt} - Executing retry with exponential backoff ", envelope.AttemptCount, ex);
                         envelope.AttemptCount++;
                         retryBackoff = await DoExponentialBackoff(retryBackoff, ct);
                     }
                 }
 
-                _log.Error("<==== Exhausted retries for customer {Id} - Parking for delayed automatic retry.", envelope.CustomerId);
-                DamperMetrics.ParkedForRetryCounter.Add(1);
+                _log.Error("<==== Exhausted retries for integration destination - Parking for delayed automatic retry.");
+                DamperMetrics.ParkedForRetryCounter.Add(1, new KeyValuePair<string, object?>(DamperConstants.DAMPER_METER_INTEGRATION_NAME, envelope.IntegrationName));
                 await envelope.FinalizeParkAsync(_contextPool); // Send to the parking lot for a time out/retry (the other special paths above will send to DLQ if necessary)
                 return FAILURE;
             }
@@ -238,7 +239,7 @@ namespace Damper.Infrastructure.DeliveryChannels
                     _contextPool.Return(envelope.AckContext);
                     envelope.AckContext = null;
                 }
-                _traceLog.Trace($"DeliverWebhookWithRetryAsync finished | CUST ID: {_customerId}");
+                _traceLog.Trace($"DeliverWebhookWithRetryAsync finished");
             }
         }
 
@@ -255,9 +256,9 @@ namespace Damper.Infrastructure.DeliveryChannels
 
     public static class DispatcherExtensions
     {
-        public static bool IsBelowCustomerRate(this int messagesInBatch, CustomerConfig _custConfig)
+        public static bool IsBelowCustomerRate(this int messagesInBatch, Integration _integration)
         {
-            return messagesInBatch < _custConfig.DeliveryRate;
+            return messagesInBatch < _integration.Route.Delivery.RequestsPerInterval;
         }
 
         public static bool Is4XX(this HttpStatusCode statusCode)
@@ -311,7 +312,7 @@ namespace Damper.Infrastructure.DeliveryChannels
 
         public static void AddDamperHeaders(this HttpRequestMessage httpRequest, MessageEnvelope envelope)
         {
-            httpRequest.Headers.Add(DamperConstants.REQUEST_X_DAMPER_CORRELATION_ID, envelope.CorrelationId);
+            httpRequest.Headers.Add(DamperConstants.REQUEST_X_DAMPER_CORRELATION_ID, envelope.CorrelationId.Value);
             httpRequest.Headers.Add(DamperConstants.REQUEST_X_DAMPER_DELIVERY_ATTEMPT, envelope.AttemptCount.ToString());
         }
 

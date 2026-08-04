@@ -1,7 +1,7 @@
 using Damper.Infrastructure.MessageTransport;
 using RabbitMQ.Client.Events;
 
-namespace Damper.Core.OutboundService
+namespace Damper.Core.MessageProcessing
 {
     public interface IShardMessageProcessor
     {

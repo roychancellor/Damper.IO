@@ -1,4 +1,4 @@
-namespace Damper.Domain
+namespace Damper.Domain.Integrations
 {
     public sealed class MessageDestination
     {
