@@ -85,7 +85,7 @@ public class CachedIntegrationRepository : IIntegrationRepository
     // TODO: Implement the repository methods
     public async Task<Integration?> GetByApiKeyAsync(ApiKey apiKey, CancellationToken ct = default)
     {
-        string cacheKey = CacheKey(apiKey.Value);
+        string cacheKey = CacheKey(apiKey.Reveal());
 
         // Look for the integration in cache first - if it's there, get out of here!
         if (_memoryCache.TryGetValue(cacheKey, out Integration? cachedInteg))

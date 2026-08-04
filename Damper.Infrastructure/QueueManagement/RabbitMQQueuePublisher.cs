@@ -80,7 +80,7 @@ namespace Damper.Infrastructure.QueueManagement
                     Headers = new Dictionary<string, object?>
                     {
                         { DamperConstants.X_DAMPER_CORRELATION_ID, envelope.CorrelationId.Value },
-                        { DamperConstants.X_DAMPER_API_KEY, envelope.ApiKey.Value },
+                        { DamperConstants.X_DAMPER_API_KEY, envelope.ApiKey.Reveal() },
                         { DamperConstants.X_DAMPER_INTEGRATION_ID, envelope.IntegrationId.ToString() },
                         { DamperConstants.X_DAMPER_INTEGRATION_NAME, envelope.IntegrationName.Value },
                         { DamperConstants.X_DAMPER_DESTINATION_URL, envelope.DestinationUrl },

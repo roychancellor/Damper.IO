@@ -29,14 +29,14 @@ public class FileSystemIntegrationRepository : IIntegrationRepository
 
     public async Task<Integration?> GetByApiKeyAsync(ApiKey apiKey, CancellationToken cancellationToken = default)
     {
-        // TODO: Actually go get config from file system
-        var toReturn = _integrations.FirstOrDefault(i => i.Ingress.ApiKey.Value.Equals(apiKey.Value, StringComparison.OrdinalIgnoreCase));
+        // TODO: Actually go get the repository objects from file system
+        var toReturn = _integrations.FirstOrDefault(i => i.Ingress.ApiKey == apiKey);
         return await Task.FromResult(toReturn);
     }
 
     public async Task<Integration?> GetByIdAsync(long integrationId, CancellationToken cancellationToken = default)
     {
-        // TODO: Actually go get config from file system
+        // TODO: Actually go get the repository objects from file system
         var toReturn = _integrations.FirstOrDefault(i => i.Id == integrationId);
         return await Task.FromResult(toReturn);
     }
