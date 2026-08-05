@@ -6,15 +6,14 @@ using Damper.Infrastructure.Logging;
 using NLog.Web;
 using NLog;
 using Damper.Infrastructure.ReferenceData;
-using Damper.Infrastructure.Models;
-using Damper.Infrastructure.CustomerChannels;
-using Damper.Infrastructure.ChannelRegistry;
-using Damper.Core.OutboundService;
 using Microsoft.Extensions.ObjectPool;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using RabbitMQ.Client;
 using Microsoft.Extensions.Options;
+using Damper.Infrastructure.MessageTransport;
+using Damper.Infrastructure.DeliveryChannels;
+using Damper.Core.MessageProcessing;
 
 var bootstrapLogger = LogManager.Setup().GetCurrentClassLogger();
 
@@ -42,10 +41,10 @@ try
     builder.Services.AddRepositories()
                     .AddRabbitMqInfrastructure()
                     .AddQueuePublishing()
-                    .AddWebhookIngestion();
-    builder.Services.AddSingleton<IChannelRegistry, CustomerChannelRegistry>();
+                    .AddMessageIngestion();
+    builder.Services.AddSingleton<IChannelRegistry, DeliveryChannelRegistry>();
     builder.Services.AddSingleton<IShardMessageProcessor, ShardMessageProcessor>();
-    builder.Services.AddSingleton<IEgressPipelineFactory, CustomerEgressPipelineFactory>();
+    builder.Services.AddSingleton<IEgressPipelineFactory, EgressPipelineFactory>();
     for (int i = 0; i < appSettings.RabbitMqSettings.NumberOfShards; i++)
     {
         int shardIndex = i;
@@ -66,18 +65,18 @@ try
                         PooledConnectionIdleTimeout = TimeSpan.FromSeconds(egressData.PooledConnectionIdleTimeoutSeconds),
                         
                         // Performance tuning for massive multi-tenant throughput
-                        MaxConnectionsPerServer = egressData.MaxConnectionsPerServer, // Limits connections to any *single* customer domain
+                        MaxConnectionsPerServer = egressData.MaxConnectionsPerServer, // Limits connections to any *single* integration domain
                         EnableMultipleHttp2Connections = egressData.EnableMultipleHttp2Connections // Enhances HTTP/2 streaming multiplexing efficiency
                     })
                     .SetHandlerLifetime(TimeSpan.FromSeconds(egressData.HandlerLifetimeSeconds)); // Syncs factory management duration
     
     // Register the default object pool provider for making a pool of WebAckContext objects
-    // Use a pooled policy for the WebhookAckContext type
+    // Use a pooled policy for the MessageAckContext type
     builder.Services.AddSingleton<ObjectPoolProvider, DefaultObjectPoolProvider>();
     builder.Services.AddSingleton(sp =>
     {
         var provider = sp.GetRequiredService<ObjectPoolProvider>();
-        return provider.Create<WebhookAckContext>();
+        return provider.Create<MessageAckContext>();
     });
 
     // Configure OpenTelemetry
@@ -117,15 +116,15 @@ try
     app.UseHttpsRedirection();
     
     Loggers.Application.Info($"Defining minimal API - MapPost");
-    app.MapPost("v1/inbound/{customerId}", async (
-        string customerId, 
+    app.MapPost("v1/inbound/{apiKey}", async (
+        string apiKey, 
         HttpContext context,
-        IWebhookIngestionService ingestionService,
+        IMessageIngestionService ingestionService,
         CancellationToken ct) =>
     {
         // Middleware creates the correlation ID and puts it in the HttpContext.Items dictionary
         var correlationId = context.Items["CorrelationId"]?.ToString() ?? $"SYSGEN-{CorrelationIdGenerator.Generate()}";
-        var thisRequest = RequestWrapper.BuildFrom(correlationId, customerId, context.Request.Headers, context.Request.Body, ct);
+        var thisRequest = RequestWrapper.BuildFrom(new(correlationId), new(apiKey), context.Request.Headers, context.Request.Body, ct);
         var result = await ingestionService.ProcessIngressAsync(thisRequest);
         
         return result.IsSuccess
@@ -136,6 +135,8 @@ try
                 ErrorType.NotFound    => Results.NotFound(new { error = result.Error.Message }),
                 ErrorType.ServerError => TypedResults.Json(new { error = "An internal processing error occurred." }, 
                                                            statusCode: StatusCodes.Status500InternalServerError),
+                ErrorType.Unauthorized => TypedResults.Json(new { error = "Unable to authenticate." }, 
+                                                            statusCode: StatusCodes.Status401Unauthorized),
                 _                     => TypedResults.Json(new { error = "Unknown error occurred" },
                                                            statusCode: StatusCodes.Status500InternalServerError)
             };

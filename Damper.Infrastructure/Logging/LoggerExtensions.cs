@@ -28,6 +28,11 @@ public static class LoggerExtensions
     public static void Fatal(this ILogger logger, Exception ex, string message, params object?[] args) 
         => logger.LogCritical(ex, message, args);
 
-    public static IDisposable? BeginCorrelationScope(this ILogger logger, string correlationId)
-        => logger.BeginScope(new Dictionary<string, object> { [DamperConstants.REQUEST_CORRELATION_ID] = correlationId });
+    public static IDisposable? BeginCorrelationScope(this ILogger logger, string correlationId, long integId, string integName)
+        => logger.BeginScope(new Dictionary<string, object>
+        {
+            [DamperConstants.REQUEST_CORRELATION_ID] = correlationId,
+            [DamperConstants.REQUEST_INTEGRATION_ID] = integId,
+            [DamperConstants.REQUEST_INTEGRATION_NAME] = integName,
+        });
 }
