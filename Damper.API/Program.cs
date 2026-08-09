@@ -14,6 +14,7 @@ using Microsoft.Extensions.Options;
 using Damper.Infrastructure.MessageTransport;
 using Damper.Infrastructure.DeliveryChannels;
 using Damper.Core.MessageProcessing;
+using Microsoft.Extensions.Primitives;
 
 var bootstrapLogger = LogManager.Setup().GetCurrentClassLogger();
 
@@ -116,12 +117,19 @@ try
     app.UseHttpsRedirection();
     
     Loggers.Application.Info($"Defining minimal API - MapPost");
-    app.MapPost("v1/inbound/{apiKey}", async (
-        string apiKey, 
+    app.MapPost("v1/inbound", async (
         HttpContext context,
         IMessageIngestionService ingestionService,
         CancellationToken ct) =>
     {
+        // Extract the API key from the HTTP headers
+        if (!context.Request.Headers.TryGetValue(DamperConstants.REQUEST_X_DAMPER_API_KEY, out var apiKeyStrVal) ||
+            StringValues.IsNullOrEmpty(apiKeyStrVal))
+        {
+            return TypedResults.Json(new { error = "Unable to authenticate." }, statusCode: StatusCodes.Status401Unauthorized);
+        }
+        var apiKey = apiKeyStrVal.ToString();
+        
         // Middleware creates the correlation ID and puts it in the HttpContext.Items dictionary
         var correlationId = context.Items["CorrelationId"]?.ToString() ?? $"SYSGEN-{CorrelationIdGenerator.Generate()}";
         var thisRequest = RequestWrapper.BuildFrom(new(correlationId), new(apiKey), context.Request.Headers, context.Request.Body, ct);

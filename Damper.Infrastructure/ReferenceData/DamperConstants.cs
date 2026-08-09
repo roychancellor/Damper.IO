@@ -2,6 +2,7 @@ namespace Damper.Infrastructure.ReferenceData
 {
     public class DamperConstants
     {
+        public const string REQUEST_X_DAMPER_API_KEY = "X-Damper-Api-Key";
         public const string REQUEST_X_CORRELATION_ID = "X-Correlation-ID";
         public const string REQUEST_CORRELATION_ID = "CorrelationId";
         public const string REQUEST_INTEGRATION_ID = "IntegrationId";
@@ -23,7 +24,6 @@ namespace Damper.Infrastructure.ReferenceData
         public const string X_DAMPER_CORRELATION_ID = "x-damper-correlation-id";
         public const string X_DAMPER_ATTEMPT_COUNT = "x-damper-attempt-count";
 
-        public const string REQUEST_X_DAMPER_API_KEY = "X-Damper-Api-Key";
         public const string REQUEST_X_DAMPER_CORRELATION_ID = "X-Damper-Correlation-Id";
         public const string REQUEST_X_DAMPER_DELIVERY_ATTEMPT = "X-Damper-Delivery-Attempt";
     }
