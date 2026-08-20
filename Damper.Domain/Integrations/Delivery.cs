@@ -1,3 +1,5 @@
+using Damper.Domain.Integrations.OutAuthentication;
+
 namespace Damper.Domain.Integrations
 {
     public sealed class Delivery
@@ -8,7 +10,7 @@ namespace Damper.Domain.Integrations
 
         public DeliverySettings Settings { get; init; } = new();
 
-        public OutboundAuthentication Authentication { get; init; } = new();
+        public OutboundAuthentication Authentication { get; init; } = new NoAuthentication();
 
         public HeaderCollection Headers { get; init; } = new();
     }

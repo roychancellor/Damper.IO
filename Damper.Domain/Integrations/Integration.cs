@@ -23,6 +23,30 @@ namespace Damper.Domain.Integrations
     PUT /integrations/{id}
     DELETE /integrations/{id}
     */
+
+    /*
+    Integration
+    │
+    ├── Id
+    ├── Name
+    ├── Description
+    ├── Enabled
+    ├── Ingress
+    │   ├── Enabled
+    │   └── ApiKeyHash
+    ├── Delivery
+    │   ├── Enabled
+    │   ├── Destination
+    │   ├── Settings
+    │   ├── Authentication
+    │   │   ├── NoAuthentication
+    │   │   ├── BasicAuthentication
+    │   │   ├── BearerAuthentication
+    │   │   └── CustomHeaderAuthentication
+    │   └── Headers
+    ├── CreatedUtc
+    └── ModifiedUtc
+    */
     public sealed class Integration
     {
         public long Id { get; init; }
