@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:18
+    container_name: damper-postgres
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: damper
+      POSTGRES_USER: damper-user
+      POSTGRES_PASSWORD: change-me
+
+    ports:
+      - "5432:5432"
+
+    volumes:
+      - damper-postgres-data:/var/lib/postgresql
+
+volumes:
+  damper-postgres-data:

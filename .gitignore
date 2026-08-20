@@ -26,3 +26,8 @@ appsettings.Development.json
 .DS_Store
 Thumbs.db
 damper-mvp.zip
+
+# Docker / local development
+.env
+.env.*
+!.env.example
