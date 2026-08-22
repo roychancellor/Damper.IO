@@ -1,8 +1,8 @@
 services:
-  postgres:
+  postgres-test:
     image: postgres:18
-    container_name: damper-postgres
-    restart: unless-stopped
+    container_name: damper-postgres-test
+    restart: "no"
 
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
@@ -16,11 +16,11 @@ services:
       DAMPER_RUNTIME_PASSWORD: ${DAMPER_RUNTIME_PASSWORD}
 
     ports:
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:5433:5432"
 
     volumes:
-      - damper-postgres-data:/var/lib/postgresql
+      - damper-postgres-test-data:/var/lib/postgresql
       - ./postgres-init:/docker-entrypoint-initdb.d:ro
 
 volumes:
-  damper-postgres-data:
+  damper-postgres-test-data:
