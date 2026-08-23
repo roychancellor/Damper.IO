@@ -15,4 +15,14 @@
     <Using Include="Microsoft.VisualStudio.TestTools.UnitTesting" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Folder Include="Damper.Domain\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Damper.Application\Damper.Application.csproj" />
+    <ProjectReference Include="..\Damper.Domain\Damper.Domain.csproj" />
+    <ProjectReference Include="..\Damper.Infrastructure\Damper.Infrastructure.csproj" />
+  </ItemGroup>
+
 </Project>
