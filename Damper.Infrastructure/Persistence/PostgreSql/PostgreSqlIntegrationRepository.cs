@@ -2,7 +2,7 @@ using Damper.Application.Integrations;
 using Damper.Domain.Common;
 using Damper.Domain.Integrations;
 
-namespace Damper.Infrastructure.Repositories
+namespace Damper.Infrastructure.Persistence.PostgreSql
 {
     // TODO: Implement the Postgres repository once Postgres is installed and running
     public class PostgreSqlIntegrationRepository : IIntegrationRepository
