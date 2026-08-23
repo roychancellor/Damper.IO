@@ -7,6 +7,7 @@ using Microsoft.Extensions.Hosting;
 using Damper.Infrastructure.ReferenceData;
 using Microsoft.Extensions.Options;
 using Damper.Domain.Integrations;
+using Damper.Application.Integrations;
 
 namespace Damper.Infrastructure.DeliveryChannels
 {

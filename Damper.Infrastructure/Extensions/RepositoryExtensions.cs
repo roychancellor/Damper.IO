@@ -3,6 +3,7 @@ using Damper.Infrastructure.Repositories;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using Damper.Infrastructure.ReferenceData;
+using Damper.Application.Integrations;
 
 namespace Damper.Infrastructure.Extensions
 {

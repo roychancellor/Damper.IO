@@ -13,6 +13,7 @@
     <PackageReference Include="RabbitMQ.Client" Version="7.2.2" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\Damper.Application\Damper.Application.csproj" />
     <ProjectReference Include="..\Damper.Domain\Damper.Domain.csproj" />
   </ItemGroup>
 </Project>

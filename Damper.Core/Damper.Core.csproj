@@ -5,6 +5,7 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="..\Damper.Application\Damper.Application.csproj" />
     <ProjectReference Include="..\Damper.Infrastructure\Damper.Infrastructure.csproj" />
   </ItemGroup>
   <ItemGroup>

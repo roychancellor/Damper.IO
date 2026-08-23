@@ -6,4 +6,8 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\Damper.Domain\Damper.Domain.csproj" />
+  </ItemGroup>
+
 </Project>
