@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Threading.Channels;
+using Damper.Application.Integrations;
 using Damper.Domain.Integrations;
 using Damper.Infrastructure.Logging;
 using Damper.Infrastructure.MessageTransport;

@@ -1,11 +1,9 @@
-using Damper.Infrastructure.Repositories;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Hosting;
 using Damper.Infrastructure.QueueManagement;
 using Damper.Infrastructure.Logging;
 using Damper.Infrastructure.MessageTransport;
-using Damper.Domain.Common;
-using Damper.Infrastructure.Security;
+using Damper.Application.Integrations;
 
 namespace Damper.Core.IngestionService;
 

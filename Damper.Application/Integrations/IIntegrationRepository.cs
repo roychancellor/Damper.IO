@@ -1,7 +1,7 @@
 using Damper.Domain.Common;
 using Damper.Domain.Integrations;
 
-namespace Damper.Infrastructure.Repositories
+namespace Damper.Application.Integrations
 {
     public interface IIntegrationRepository
     {

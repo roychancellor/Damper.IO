@@ -1,5 +1,6 @@
 <Solution>
   <Project Path="Damper.API/Damper.API.csproj" />
+  <Project Path="Damper.Application/Damper.Application.csproj" Id="4c595fe6-5033-4736-bd0c-5d70680fe477" />
   <Project Path="Damper.Core/Damper.Core.csproj" />
   <Project Path="Damper.Domain/Damper.Domain.csproj" />
   <Project Path="Damper.Infrastructure/Damper.Infrastructure.csproj" />

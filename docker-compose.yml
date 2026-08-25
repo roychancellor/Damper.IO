@@ -1,0 +1,43 @@
+services:
+  postgres:
+    image: postgres:18
+    container_name: damper-postgres
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+
+      DAMPER_ADMIN_USER: ${DAMPER_ADMIN_USER}
+      DAMPER_ADMIN_PASSWORD: ${DAMPER_ADMIN_PASSWORD}
+
+      DAMPER_RUNTIME_USER: ${DAMPER_RUNTIME_USER}
+      DAMPER_RUNTIME_PASSWORD: ${DAMPER_RUNTIME_PASSWORD}
+
+    ports:
+      - "127.0.0.1:5432:5432"
+
+    volumes:
+      - damper-postgres-data:/var/lib/postgresql
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+
+  rabbitmq:
+    image: rabbitmq:4-management
+    container_name: damper-rabbitmq
+    restart: unless-stopped
+
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASSWORD}
+
+    ports:
+      - "127.0.0.1:5672:5672"
+      - "127.0.0.1:15672:15672"
+
+    volumes:
+      - damper-rabbitmq-data:/var/lib/rabbitmq
+
+volumes:
+  damper-postgres-data:
+  damper-rabbitmq-data:

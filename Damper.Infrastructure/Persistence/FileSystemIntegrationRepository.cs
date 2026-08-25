@@ -1,5 +1,7 @@
+using Damper.Application.Integrations;
 using Damper.Domain.Common;
 using Damper.Domain.Integrations;
+using Damper.Domain.Integrations.OutAuthentication;
 using Damper.Infrastructure.Security;
 
 namespace Damper.Infrastructure.Repositories;
@@ -64,7 +66,7 @@ public class FileSystemIntegrationRepository : IIntegrationRepository
             },
             Delivery = new Delivery
             {
-                Authentication = new OutboundAuthentication(),
+                Authentication = new NoAuthentication(),
                 Enabled = true,
                 Headers = new HeaderCollection(),
                 Destination = new Destination { Uri = new Uri($"http://httpbin.org/status/{destHttpReturnCode}") },

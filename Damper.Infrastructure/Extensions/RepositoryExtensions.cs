@@ -3,6 +3,8 @@ using Damper.Infrastructure.Repositories;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using Damper.Infrastructure.ReferenceData;
+using Damper.Application.Integrations;
+using Damper.Infrastructure.Persistence.PostgreSql;
 
 namespace Damper.Infrastructure.Extensions
 {
