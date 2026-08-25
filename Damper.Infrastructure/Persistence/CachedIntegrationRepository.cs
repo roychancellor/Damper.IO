@@ -133,7 +133,7 @@ public class CachedIntegrationRepository : IIntegrationRepository
         throw new NotImplementedException();
     }
 
-    public Task SaveAsync(Integration integration, CancellationToken cancellationToken = default)
+    public Task<Integration> SaveAsync(Integration integration, CancellationToken cancellationToken = default)
     {
         throw new NotImplementedException();
     }

@@ -44,7 +44,7 @@ public class FileSystemIntegrationRepository : IIntegrationRepository
         return await Task.FromResult(toReturn);
     }
 
-    public async Task SaveAsync(Integration integration, CancellationToken cancellationToken = default)
+    public async Task<Integration> SaveAsync(Integration integration, CancellationToken cancellationToken = default)
     {
         throw new NotImplementedException();
     }
@@ -61,7 +61,7 @@ public class FileSystemIntegrationRepository : IIntegrationRepository
             ModifiedUtc = DateTime.UtcNow,
             Ingress = new Ingress
             {
-                ApiKeyHash = new ApiKeyHash(new ApiKey(apiKey).ToHash()),
+                ApiKeyHash = new ApiKey(apiKey).ToHash(),
                 Enabled = true,
             },
             Delivery = new Delivery

@@ -10,6 +10,8 @@ namespace Damper.Domain.Common
 
         private readonly string _value = value ?? string.Empty;
 
+        public bool IsEmpty => string.IsNullOrEmpty(_value);
+
         // Deliberate, auditable - anyone reading a call site immediately sees
         // "this code is intentionally touching the real value."
         public string Reveal() => _value;

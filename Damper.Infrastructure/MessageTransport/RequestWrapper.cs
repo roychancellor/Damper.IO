@@ -8,9 +8,7 @@ using Microsoft.Extensions.Primitives;
 namespace Damper.Infrastructure.MessageTransport
 {
     public class RequestWrapper
-    {
-        private static string _stringEmptyHash = new ApiKey(string.Empty).ToHash();
-        
+    {        
         private ApiKey _apiKey;
         public string ApiKeyMasked => _apiKey.Masked;
         public ApiKeyHash ApiKeyHash { get; set; }
@@ -26,7 +24,7 @@ namespace Damper.Infrastructure.MessageTransport
             return new RequestWrapper
             {
                 _apiKey = apiKey,
-                ApiKeyHash = new(apiKey.ToHash()),
+                ApiKeyHash = apiKey.IsEmpty ? new ApiKeyHash() : apiKey.ToHash(),
                 CorrelationId = correlationId,
                 HttpHeaders = headers,
                 RequestBody = body,
@@ -43,15 +41,13 @@ namespace Damper.Infrastructure.MessageTransport
 
         public bool IsProcessable()
         {
-            var hashedApiKey = ApiKeyHash.ToString();
             return !(
-                        string.IsNullOrWhiteSpace(CorrelationId.Value) ||
-                        string.IsNullOrWhiteSpace(hashedApiKey) ||
-                        hashedApiKey.Equals(_stringEmptyHash) ||
-                        HttpHeaders == null ||
-                        HttpHeaders.Count == 0 ||
-                        RequestBody == null
-                    );
+                string.IsNullOrWhiteSpace(CorrelationId.Value) ||
+                ApiKeyHash.IsEmpty ||
+                HttpHeaders == null ||
+                HttpHeaders.Count == 0 ||
+                RequestBody == null
+            );
         }
 
         public async Task<ReadOnlyMemory<byte>> ReadRequestBodyToMemoryAsync()
