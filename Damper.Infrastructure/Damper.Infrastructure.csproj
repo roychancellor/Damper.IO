@@ -16,4 +16,7 @@
     <ProjectReference Include="..\Damper.Application\Damper.Application.csproj" />
     <ProjectReference Include="..\Damper.Domain\Damper.Domain.csproj" />
   </ItemGroup>
+	<ItemGroup>
+		<InternalsVisibleTo Include="Damper.Tests" />
+	</ItemGroup>
 </Project>
