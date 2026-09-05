@@ -1,20 +1,21 @@
 using Damper.Core.IngestionService;
+using Damper.Core.MessageProcessing;
 using Damper.Core.Middleware;
 using Damper.Core.Utilities;
+using Damper.Infrastructure.DeliveryChannels;
 using Damper.Infrastructure.Extensions;
 using Damper.Infrastructure.Logging;
-using NLog.Web;
-using NLog;
+using Damper.Infrastructure.MessageTransport;
 using Damper.Infrastructure.ReferenceData;
+using Damper.Infrastructure.Security;
 using Microsoft.Extensions.ObjectPool;
+using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Primitives;
+using NLog;
+using NLog.Web;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using RabbitMQ.Client;
-using Microsoft.Extensions.Options;
-using Damper.Infrastructure.MessageTransport;
-using Damper.Infrastructure.DeliveryChannels;
-using Damper.Core.MessageProcessing;
-using Microsoft.Extensions.Primitives;
 
 var bootstrapLogger = LogManager.Setup().GetCurrentClassLogger();
 
@@ -46,6 +47,7 @@ try
     builder.Services.AddSingleton<IChannelRegistry, DeliveryChannelRegistry>();
     builder.Services.AddSingleton<IShardMessageProcessor, ShardMessageProcessor>();
     builder.Services.AddSingleton<IEgressPipelineFactory, EgressPipelineFactory>();
+    builder.Services.AddSingleton<ISecretProtector, AesGcmSecretProtector>();
     for (int i = 0; i < appSettings.RabbitMqSettings.NumberOfShards; i++)
     {
         int shardIndex = i;

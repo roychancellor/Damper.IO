@@ -18,5 +18,8 @@ namespace Damper.Infrastructure.ReferenceData
         
         [Required]
         public EgressSettings EgressSettings { get; set; } = new();
+
+        [Required]
+        public EncryptionSettings EncryptionSettings { get; set; } = new();
     }
 }
