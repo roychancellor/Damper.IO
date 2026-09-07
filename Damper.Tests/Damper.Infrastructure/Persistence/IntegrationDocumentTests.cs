@@ -3,9 +3,8 @@ using Damper.Domain.Enums;
 using Damper.Domain.Integrations;
 using Damper.Domain.Integrations.OutAuthentication;
 using Damper.Infrastructure.Persistence.PostgreSql;
-using Damper.Infrastructure.Security;
 
-namespace Damper.Tests;
+namespace Damper.Tests.Damper.Infrastructure.Persistence;
 
 [TestClass]
 public class IntegrationDocumentTests
