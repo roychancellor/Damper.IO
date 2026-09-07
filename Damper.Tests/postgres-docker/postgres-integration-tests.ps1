@@ -106,7 +106,7 @@ function Invoke-Psql {
         psql `
         -U $User `
         -d damper `
-        -At `
+        -Atq `
         -v ON_ERROR_STOP=1 `
         -c $Sql 2>&1
 
@@ -125,16 +125,27 @@ function Invoke-PsqlExpectedFailure {
         [string]$TestName
     )
 
-    $result = & docker exec `
-        -e "PGPASSWORD=$Password" `
-        $ContainerName `
-        psql `
-        -U $User `
-        -d damper `
-        -v ON_ERROR_STOP=1 `
-        -c $Sql 2>&1
+    $previousErrorActionPreference = $ErrorActionPreference
 
-    if ($LASTEXITCODE -ne 0) {
+    try {
+        $ErrorActionPreference = "Continue"
+
+        $result = & docker exec `
+            -e "PGPASSWORD=$Password" `
+            $ContainerName `
+            psql `
+            -U $User `
+            -d damper `
+            -v ON_ERROR_STOP=1 `
+            -c $Sql 2>&1
+
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+
+    if ($exitCode -ne 0) {
         Pass $TestName
     }
     else {
@@ -556,12 +567,12 @@ Assert-Equal `
 $updateResult = Invoke-Psql `
     $RuntimeUser `
     $RuntimePassword `
-    "UPDATE damper.integration SET name = 'Integration Test Updated', modified_at = now() WHERE id = $insertedId;"
+    "UPDATE damper.integration SET name = 'Integration Test Updated', modified_at = now() WHERE id = $insertedId RETURNING id;"
 
 Assert-Equal `
     "Runtime UPDATE" `
     $updateResult `
-    "UPDATE 1"
+    $insertedId
 
 $updatedName = Invoke-Psql `
     $RuntimeUser `
@@ -576,12 +587,12 @@ Assert-Equal `
 $deleteResult = Invoke-Psql `
     $RuntimeUser `
     $RuntimePassword `
-    "DELETE FROM damper.integration WHERE id = $insertedId;"
+    "DELETE FROM damper.integration WHERE id = $insertedId RETURNING id;"
 
 Assert-Equal `
     "Runtime DELETE" `
     $deleteResult `
-    "DELETE 1"
+    $insertedId
 
 $remaining = Invoke-Psql `
     $RuntimeUser `
@@ -627,7 +638,7 @@ $defaultPrivileges = Invoke-Psql `
     $Superuser `
     $SuperuserPassword `
     @"
-SELECT defaclobjtype || '|' || array_to_string(defaclacl, ',')
+SELECT defaclobjtype::text || '|' || array_to_string(defaclacl, ',')
 FROM pg_default_acl
 WHERE defaclrole = '$AdminUser'::regrole
   AND defaclnamespace = 'damper'::regnamespace
