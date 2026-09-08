@@ -1,14 +1,18 @@
 $ErrorActionPreference = "Stop"
 
 # ============================================================================
-# Damper PostgreSQL Integration Tests
+# Damper PostgreSQL Bootstrap Tests
 # ============================================================================
 #
-# Tests a completely disposable PostgreSQL 18 instance using:
+# Validates that a completely disposable PostgreSQL 18 instance can be
+# bootstrapped correctly using the real Damper initialization scripts.
 #
 #   docker-compose-test.yml
 #   postgres-init/01-roles.sh
 #   postgres-init/02-schema.sh
+#
+# Repository and persistence behavior is tested by the C# Testcontainers suite.
+# Tests a completely disposable PostgreSQL 18 instance using:
 #
 # The test database is completely isolated from the normal Damper database.
 #
@@ -509,100 +513,6 @@ foreach ($expected in $expectedPrivileges) {
         Fail "Missing runtime privilege: $expected"
     }
 }
-
-# ============================================================================
-# RUNTIME CRUD
-# ============================================================================
-
-Write-Header "Runtime CRUD"
-
-$insertSql = @"
-INSERT INTO damper.integration
-(
-    name,
-    api_key_hash,
-    configuration,
-    created_at,
-    modified_at
-)
-VALUES
-(
-    'Integration Test',
-    decode(repeat('00', 32), 'hex'),
-    '{}'::jsonb,
-    now(),
-    now()
-)
-RETURNING id
-"@
-
-$insertedId = Invoke-Psql `
-    $RuntimeUser `
-    $RuntimePassword `
-    $insertSql
-
-if ([string]::IsNullOrWhiteSpace($insertedId)) {
-    Fail "Runtime INSERT did not return an ID"
-    throw "Cannot continue CRUD tests without inserted ID."
-}
-
-if ($insertedId -match '^\d+$') {
-    Pass "Runtime INSERT"
-}
-else {
-    Fail "Runtime INSERT returned unexpected value: '$insertedId'"
-    throw "Cannot continue CRUD tests without valid inserted ID."
-}
-
-$selectedName = Invoke-Psql `
-    $RuntimeUser `
-    $RuntimePassword `
-    "SELECT name FROM damper.integration WHERE id = $insertedId;"
-
-Assert-Equal `
-    "Runtime SELECT" `
-    $selectedName `
-    "Integration Test"
-
-$updateResult = Invoke-Psql `
-    $RuntimeUser `
-    $RuntimePassword `
-    "UPDATE damper.integration SET name = 'Integration Test Updated', modified_at = now() WHERE id = $insertedId RETURNING id;"
-
-Assert-Equal `
-    "Runtime UPDATE" `
-    $updateResult `
-    $insertedId
-
-$updatedName = Invoke-Psql `
-    $RuntimeUser `
-    $RuntimePassword `
-    "SELECT name FROM damper.integration WHERE id = $insertedId;"
-
-Assert-Equal `
-    "Runtime SELECT after UPDATE" `
-    $updatedName `
-    "Integration Test Updated"
-
-$deleteResult = Invoke-Psql `
-    $RuntimeUser `
-    $RuntimePassword `
-    "DELETE FROM damper.integration WHERE id = $insertedId RETURNING id;"
-
-Assert-Equal `
-    "Runtime DELETE" `
-    $deleteResult `
-    $insertedId
-
-$remaining = Invoke-Psql `
-    $RuntimeUser `
-    $RuntimePassword `
-    "SELECT COUNT(*) FROM damper.integration WHERE id = $insertedId;"
-
-Assert-Equal `
-    "Runtime DELETE verification" `
-    $remaining `
-    "0"
 
 # ============================================================================
 # SECURITY BOUNDARY
