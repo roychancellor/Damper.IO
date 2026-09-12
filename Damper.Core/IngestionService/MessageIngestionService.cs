@@ -14,12 +14,12 @@ public class MessageIngestionService : IMessageIngestionService
 
     private readonly IHostApplicationLifetime _appLifetime;
     
-    private readonly IIntegrationRepository _integRepo;
+    private readonly IIntegrationService _integService;
     private readonly IQueuePublisher _queuePublisher;
 
-    public MessageIngestionService(IIntegrationRepository integRepo, IQueuePublisher queuePublisher, IHostApplicationLifetime appLifetime)
+    public MessageIngestionService(IIntegrationService integService, IQueuePublisher queuePublisher, IHostApplicationLifetime appLifetime)
     {
-        _integRepo = integRepo;
+        _integService = integService;
         _queuePublisher = queuePublisher;
         _appLifetime = appLifetime;
     }
@@ -39,7 +39,7 @@ public class MessageIngestionService : IMessageIngestionService
 
         _log.Info($"====> New message request received | CORRELATION ID: {corrId}");
         _traceLog.Trace($"Getting integration from repo by API KEY (REDACTED)");
-        var integration = await _integRepo.GetByApiKeyHashAsync(apiKeyHash, rw.CancelToken);
+        var integration = await _integService.GetByApiKeyHashAsync(apiKeyHash, rw.CancelToken);
         if (integration == null)
         {
             return rw.SetError($"ApiKey not found - treat as unauthorized | API KEY (MASKED): {rw.ApiKeyMasked}", ErrorType.Unauthorized).LogAndGenerateFailureResult();

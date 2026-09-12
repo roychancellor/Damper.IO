@@ -3,7 +3,6 @@ using Damper.Domain.Integrations;
 using Damper.Infrastructure.Logging;
 using Damper.Infrastructure.MessageTransport;
 using Damper.Infrastructure.ReferenceData;
-using Damper.Infrastructure.Repositories;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.ObjectPool;

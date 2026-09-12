@@ -5,7 +5,8 @@ using Damper.Infrastructure.ReferenceData;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using System.Collections.Concurrent;
-namespace Damper.Infrastructure.Repositories;
+
+namespace Damper.Infrastructure.Persistence;
 
 public class CachedIntegrationRepository : IIntegrationRepository
 {

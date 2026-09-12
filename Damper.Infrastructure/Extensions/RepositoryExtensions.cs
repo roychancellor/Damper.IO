@@ -1,7 +1,7 @@
 using Damper.Application.Integrations;
+using Damper.Infrastructure.Persistence;
 using Damper.Infrastructure.Persistence.PostgreSql;
 using Damper.Infrastructure.ReferenceData;
-using Damper.Infrastructure.Repositories;
 using Dapper;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;

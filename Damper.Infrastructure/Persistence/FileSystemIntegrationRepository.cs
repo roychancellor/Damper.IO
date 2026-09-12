@@ -4,7 +4,7 @@ using Damper.Domain.Integrations;
 using Damper.Domain.Integrations.OutAuthentication;
 using Damper.Infrastructure.Security;
 
-namespace Damper.Infrastructure.Repositories;
+namespace Damper.Infrastructure.Persistence;
 
 public class FileSystemIntegrationRepository : IIntegrationRepository
 {

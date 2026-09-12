@@ -1,3 +1,4 @@
+using Damper.Application.Integrations;
 using Damper.Core.IngestionService;
 using Damper.Core.MessageProcessing;
 using Damper.Core.Middleware;
@@ -48,6 +49,7 @@ try
     builder.Services.AddSingleton<IShardMessageProcessor, ShardMessageProcessor>();
     builder.Services.AddSingleton<IEgressPipelineFactory, EgressPipelineFactory>();
     builder.Services.AddSingleton<ISecretProtector, AesGcmSecretProtector>();
+    builder.Services.AddScoped<IIntegrationService, IntegrationService>();
     for (int i = 0; i < appSettings.RabbitMqSettings.NumberOfShards; i++)
     {
         int shardIndex = i;
