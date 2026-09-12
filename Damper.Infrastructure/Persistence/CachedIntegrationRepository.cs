@@ -13,7 +13,7 @@ public class CachedIntegrationRepository : IIntegrationRepository
     private readonly IIntegrationRepository _durableRepo;
     private readonly IMemoryCache _memoryCache;
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _locks = new();
-    private IOptionsMonitor<AppSettings> _optMon;
+    private readonly IOptionsMonitor<AppSettings> _optMon;
 
     public CachedIntegrationRepository(IIntegrationRepository innerRepository, IMemoryCache memoryCache, IOptionsMonitor<AppSettings> optMon)
     {
@@ -34,7 +34,7 @@ public class CachedIntegrationRepository : IIntegrationRepository
 
         // Cache miss: Go fetch from the durable repository using single flight pattern
         var sem = _locks.GetOrAdd(cacheKey, _ => new SemaphoreSlim(1, 1));
-        await sem.WaitAsync(CancellationToken.None);
+        await sem.WaitAsync(ct);
         try
         {
             // Try the cache again in case another thread put it in there - if it hits, get out of here!
@@ -71,16 +71,6 @@ public class CachedIntegrationRepository : IIntegrationRepository
         return TimeSpan.FromMinutes(_optMon.CurrentValue.RepositorySettings.CacheTimeToLiveMinutes);
     }
 
-    public void Invalidate(long integrationId)
-    {
-        _memoryCache.Remove(CacheKey(integrationId));
-    }
-
-    public void Update(long integrationId, Integration config)
-    {
-        _memoryCache.Set(CacheKey(integrationId), config, GetCacheTimeToLive());
-    }
-
     private static string CacheKey(long integrationId) => $"integration-{integrationId}";
     private static string CacheKey(string apiKey) => $"apikey-{apiKey}";
 
@@ -97,7 +87,7 @@ public class CachedIntegrationRepository : IIntegrationRepository
 
         // Cache miss: Go fetch from the durable repository using single flight pattern
         var sem = _locks.GetOrAdd(cacheKey, _ => new SemaphoreSlim(1, 1));
-        await sem.WaitAsync(CancellationToken.None);
+        await sem.WaitAsync(ct);
         try
         {
             // Try the cache again in case another thread put it in there - if it hits, get out of here!
@@ -131,16 +121,56 @@ public class CachedIntegrationRepository : IIntegrationRepository
 
     public Task<IReadOnlyCollection<Integration>> GetAllAsync(CancellationToken cancellationToken = default)
     {
-        throw new NotImplementedException();
+        // Don't cache all integrations, just go get them when needed (this is not a hot path request)
+        return _durableRepo.GetAllAsync(cancellationToken);
     }
 
-    public Task<Integration> SaveAsync(Integration integration, CancellationToken cancellationToken = default)
+    public async Task<Integration> SaveAsync(Integration integration, CancellationToken cancellationToken = default)
     {
-        throw new NotImplementedException();
+        Integration? existing = null;
+
+        if (integration.Id > 0)
+        {
+            existing = await _durableRepo.GetByIdAsync(integration.Id, cancellationToken);
+        }
+
+        var saved = await _durableRepo.SaveAsync(integration, cancellationToken);
+
+        // Remove the old API-key cache entry in case the key changed or the Integration was disabled.
+        if (existing != null)
+        {
+            _memoryCache.Remove(CacheKey(existing.Ingress.ApiKeyHash.ToString()));
+        }
+
+        // Always refresh the ID cache with the persisted Integration.
+        _memoryCache.Set(CacheKey(saved.Id), saved, GetCacheTimeToLive());
+
+        // The durable API-key lookup only returns enabled Integrations, so the cache must preserve the same behavior.
+        var apiKeyCacheKey = CacheKey(saved.Ingress.ApiKeyHash.ToString());
+
+        if (saved.Enabled)
+        {
+            _memoryCache.Set(apiKeyCacheKey, saved, GetCacheTimeToLive());
+        }
+        else
+        {
+            _memoryCache.Remove(apiKeyCacheKey);
+        }
+
+        return saved;
     }
 
-    public Task DeleteAsync(long integrationId, CancellationToken cancellationToken = default)
+    public async Task DeleteAsync(long integrationId, CancellationToken cancellationToken = default)
     {
-        throw new NotImplementedException();
+        var existing = await _durableRepo.GetByIdAsync(integrationId, cancellationToken);
+
+        await _durableRepo.DeleteAsync(integrationId, cancellationToken);
+
+        _memoryCache.Remove(CacheKey(integrationId));
+
+        if (existing != null)
+        {
+            _memoryCache.Remove(CacheKey(existing.Ingress.ApiKeyHash.ToString()));
+        }
     }
 }

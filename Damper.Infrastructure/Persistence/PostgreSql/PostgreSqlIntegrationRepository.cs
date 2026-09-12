@@ -23,12 +23,12 @@ public sealed class PostgreSqlIntegrationRepository : IIntegrationRepository
     private const string UpdateSql = "SELECT * FROM damper.integration_update(@p_id, @p_name, @p_enabled, @p_api_key_hash, CAST(@p_configuration AS jsonb));";
     private const string DeleteByIdSql = "SELECT damper.integration_delete(@p_id);";
 
-    public PostgreSqlIntegrationRepository(IOptions<RepositorySettings> options, ISecretProtector secretProtector)
+    public PostgreSqlIntegrationRepository(IOptions<AppSettings> options, ISecretProtector secretProtector)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(secretProtector);
 
-        var settings = options.Value;
+        var settings = options.Value.RepositorySettings;
 
         _connectionString = new NpgsqlConnectionStringBuilder
         {

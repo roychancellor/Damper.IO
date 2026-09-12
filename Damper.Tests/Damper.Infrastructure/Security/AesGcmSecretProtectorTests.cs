@@ -67,25 +67,33 @@ public class AesGcmSecretProtectorTests
     [TestMethod]
     public void Constructor_InvalidKeyLength_ShouldPassIf_ThrowsExpectedException()
     {
-        var settings = new EncryptionSettings
+        var encrSettings = new EncryptionSettings
         {
             Key = Convert.ToBase64String(RandomNumberGenerator.GetBytes(16)),
             KeyVersion = 1
         };
+        var appSettings = new AppSettings
+        {
+            EncryptionSettings = encrSettings,
+        };
 
-        Assert.Throws<InvalidOperationException>(() => new AesGcmSecretProtector(Options.Create(settings)));
+        Assert.Throws<InvalidOperationException>(() => new AesGcmSecretProtector(Options.Create(appSettings)));
     }
 
     [TestMethod]
     public void Constructor_InvalidBase64Key_ShouldPassIf_ThrowsExpectedException()
     {
-        var settings = new EncryptionSettings
+        var encrSettings = new EncryptionSettings
         {
             Key = "this-is-not-base64",
             KeyVersion = 1
         };
+        var appSettings = new AppSettings
+        {
+            EncryptionSettings = encrSettings,
+        };
 
-        Assert.Throws<InvalidOperationException>(() => new AesGcmSecretProtector(Options.Create(settings)));
+        Assert.Throws<InvalidOperationException>(() => new AesGcmSecretProtector(Options.Create(appSettings)));
     }
 
     [TestMethod]
@@ -133,12 +141,16 @@ class AesGcmSecretProtectorTestSetup
     {
         var key = RandomNumberGenerator.GetBytes(32);
 
-        var settings = new EncryptionSettings
+        var encrSettings = new EncryptionSettings
         {
             Key = Convert.ToBase64String(key),
             KeyVersion = keyVersion,
         };
+        var appSettings = new AppSettings
+        {
+            EncryptionSettings = encrSettings,
+        };
 
-        return new AesGcmSecretProtector(Options.Create(settings));
+        return new AesGcmSecretProtector(Options.Create(appSettings));
     }
 }

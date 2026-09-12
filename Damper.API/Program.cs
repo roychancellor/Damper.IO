@@ -1,3 +1,4 @@
+using Damper.API.Startup;
 using Damper.Application.Integrations;
 using Damper.Core.IngestionService;
 using Damper.Core.MessageProcessing;
@@ -153,7 +154,13 @@ try
                                                            statusCode: StatusCodes.Status500InternalServerError)
             };
     });
-    
+
+    // DEVELOPMENT USE ONLY
+    if (app.Environment.IsDevelopment() && app.Configuration.GetValue<bool>("SeedDevelopmentData"))
+    {
+        await Startup.SeedIntegrationsIfEmpty(app);
+    }
+
     Loggers.Application.Info($"Calling app.Run");
     app.Run();
 }

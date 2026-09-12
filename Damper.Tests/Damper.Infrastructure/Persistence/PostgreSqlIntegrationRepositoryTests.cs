@@ -32,17 +32,19 @@ public sealed class PostgreSqlIntegrationRepositoryTests
         _environment = new PostgreSqlTestEnvironment();
         await _environment.StartAsync();
 
-        var repositoryOptions = Options.Create(_environment.GetRuntimeRepositorySettings());
+        var appOptions = Options.Create(_environment.GetRuntimeAppSettings());
+        var repositoryOptions = Options.Create(_environment.GetRuntimeAppSettings().RepositorySettings);
 
         var encryptionSettings = new EncryptionSettings
         {
             Key = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)),
             KeyVersion = 1
         };
+        appOptions.Value.EncryptionSettings = encryptionSettings;
 
-        var secretProtector = new AesGcmSecretProtector(Options.Create(encryptionSettings));
+        var secretProtector = new AesGcmSecretProtector(appOptions);
 
-        _repository = new PostgreSqlIntegrationRepository(repositoryOptions, secretProtector);
+        _repository = new PostgreSqlIntegrationRepository(appOptions, secretProtector);
     }
 
     [ClassCleanup]

@@ -22,8 +22,8 @@ namespace Damper.Infrastructure.Extensions
             // Register the decorator to intercept calls
             services.AddScoped<IIntegrationRepository>(provider => 
                 new CachedIntegrationRepository(
-                    //provider.GetRequiredService<PostgreSqlIntegrationRepository>(),
-                    provider.GetRequiredService<FileSystemIntegrationRepository>(),
+                    provider.GetRequiredService<PostgreSqlIntegrationRepository>(),
+                    //provider.GetRequiredService<FileSystemIntegrationRepository>(),
                     provider.GetRequiredService<IMemoryCache>(),
                     provider.GetRequiredService<IOptionsMonitor<AppSettings>>()
                 ));

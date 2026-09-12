@@ -21,4 +21,7 @@
 	<ItemGroup>
 		<InternalsVisibleTo Include="Damper.Tests" />
 	</ItemGroup>
+	<ItemGroup>
+	  <Folder Include="Persistence\PostgreSql\Upgrades\" />
+	</ItemGroup>
 </Project>

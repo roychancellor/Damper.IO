@@ -64,6 +64,14 @@ internal sealed class PostgreSqlTestEnvironment : IAsyncDisposable
         await _container.StartAsync();
     }
 
+    public AppSettings GetRuntimeAppSettings()
+    {
+        return new AppSettings
+        {
+            RepositorySettings = GetRuntimeRepositorySettings(),
+        };
+    }
+
     public RepositorySettings GetRuntimeRepositorySettings()
     {
         return new RepositorySettings

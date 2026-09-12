@@ -15,11 +15,11 @@ public sealed class AesGcmSecretProtector : ISecretProtector
     private readonly byte[] _key;
     private readonly int _keyVersion;
 
-    public AesGcmSecretProtector(IOptions<EncryptionSettings> options)
+    public AesGcmSecretProtector(IOptions<AppSettings> options)
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        var settings = options.Value;
+        var settings = options.Value.EncryptionSettings;
 
         if (string.IsNullOrWhiteSpace(settings.Key))
         {
