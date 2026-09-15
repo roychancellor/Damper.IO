@@ -4,7 +4,7 @@ using Damper.Domain.Integrations;
 using Damper.Domain.Integrations.OutAuthentication;
 using Damper.Infrastructure.Security;
 
-namespace Damper.Infrastructure.Repositories;
+namespace Damper.Infrastructure.Persistence;
 
 public class FileSystemIntegrationRepository : IIntegrationRepository
 {
@@ -44,7 +44,7 @@ public class FileSystemIntegrationRepository : IIntegrationRepository
         return await Task.FromResult(toReturn);
     }
 
-    public async Task SaveAsync(Integration integration, CancellationToken cancellationToken = default)
+    public async Task<Integration> SaveAsync(Integration integration, CancellationToken cancellationToken = default)
     {
         throw new NotImplementedException();
     }
@@ -61,7 +61,7 @@ public class FileSystemIntegrationRepository : IIntegrationRepository
             ModifiedUtc = DateTime.UtcNow,
             Ingress = new Ingress
             {
-                ApiKeyHash = new ApiKeyHash(new ApiKey(apiKey).ToHash()),
+                ApiKeyHash = new ApiKey(apiKey).ToHash(),
                 Enabled = true,
             },
             Delivery = new Delivery

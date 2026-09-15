@@ -31,3 +31,4 @@ damper-mvp.zip
 .env
 .env.*
 !.env.example
+*.zip

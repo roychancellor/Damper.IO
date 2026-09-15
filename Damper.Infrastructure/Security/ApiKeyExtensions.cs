@@ -6,9 +6,10 @@ namespace Damper.Infrastructure.Security;
 
 public static class ApiKeyExtensions
 {
-    public static string ToHash(this ApiKey apiKey)
+    public static ApiKeyHash ToHash(this ApiKey apiKey)
     {
         var hashBytes = SHA256.HashData(Encoding.UTF8.GetBytes(apiKey.Reveal()));
-        return Convert.ToHexString(hashBytes); // stable, indexable, readable in a DB browser
+
+        return new ApiKeyHash(hashBytes);
     }
 }

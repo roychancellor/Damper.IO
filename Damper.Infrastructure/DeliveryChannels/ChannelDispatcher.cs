@@ -7,7 +7,6 @@ using Damper.Infrastructure.Logging;
 using Damper.Infrastructure.MessageTransport;
 using Damper.Infrastructure.Observability;
 using Damper.Infrastructure.ReferenceData;
-using Damper.Infrastructure.Repositories;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.ObjectPool;
@@ -144,8 +143,8 @@ namespace Damper.Infrastructure.DeliveryChannels
                 _traceLog.Trace($"Refreshing integration configuration | INTEG ID: {_integrationId}");
 
                 using var scope = _scopeFactory.CreateScope();
-                var repo = scope.ServiceProvider.GetRequiredService<IIntegrationRepository>();
-                var freshConfig = await repo.GetByIdAsync(_integrationId, ct);
+                var integService = scope.ServiceProvider.GetRequiredService<IIntegrationService>();
+                var freshConfig = await integService.GetByIdAsync(_integrationId, ct);
 
                 if (freshConfig != null)
                 {

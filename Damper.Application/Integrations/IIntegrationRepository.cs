@@ -11,7 +11,7 @@ namespace Damper.Application.Integrations
 
         Task<IReadOnlyCollection<Integration>> GetAllAsync(CancellationToken cancellationToken = default);
 
-        Task SaveAsync(Integration integration, CancellationToken cancellationToken = default);
+        Task<Integration> SaveAsync(Integration integration, CancellationToken cancellationToken = default);
 
         Task DeleteAsync(long integrationId, CancellationToken cancellationToken = default);
     }

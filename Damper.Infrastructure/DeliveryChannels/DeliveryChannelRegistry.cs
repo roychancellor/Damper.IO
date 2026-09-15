@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using Damper.Infrastructure.Logging;
-using Damper.Infrastructure.Repositories;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Hosting;
@@ -116,8 +115,8 @@ namespace Damper.Infrastructure.DeliveryChannels
         {
             using var scope = _scopeFactory.CreateScope();
             _traceLog.Trace($"Primary + secondary channel registry MISS - getting integration repository and retrieving integration config | INTEG ID: {integrationId}");
-            var repo = scope.ServiceProvider.GetRequiredService<IIntegrationRepository>();
-            var currentConfig = await repo.GetByIdAsync(integrationId, _ct);
+            var integService = scope.ServiceProvider.GetRequiredService<IIntegrationService>();
+            var currentConfig = await integService.GetByIdAsync(integrationId, _ct);
             if (currentConfig == null)
             {
                 var msg = $"Configuration missing for integration with ID: {integrationId}";
