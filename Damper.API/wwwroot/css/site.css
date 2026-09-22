@@ -1,0 +1,105 @@
+﻿body {
+    margin: 0;
+    font-family: Arial, Helvetica, sans-serif;
+    color: #222;
+    background: #f7f7f7;
+}
+
+header {
+    background: #222;
+    color: white;
+}
+
+.container {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+.header {
+    display: flex;
+    align-items: center;
+    gap: 30px;
+}
+
+.brand {
+    color: white;
+    font-size: 22px;
+    font-weight: bold;
+    text-decoration: none;
+}
+
+nav a {
+    color: #ddd;
+    text-decoration: none;
+}
+
+h1 {
+    margin-top: 10px;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    background: white;
+}
+
+th, td {
+    padding: 10px 12px;
+    border-bottom: 1px solid #ddd;
+    text-align: left;
+}
+
+th {
+    background: #eee;
+}
+
+a {
+    color: #1264a3;
+}
+
+.button {
+    display: inline-block;
+    padding: 8px 12px;
+    background: #1264a3;
+    color: white;
+    text-decoration: none;
+    border-radius: 4px;
+}
+
+.actions {
+    margin-bottom: 15px;
+}
+
+.form-group {
+    margin-bottom: 15px;
+}
+
+    .form-group label {
+        display: block;
+        margin-bottom: 5px;
+        font-weight: bold;
+    }
+
+    .form-group input[type="text"],
+    .form-group input[type="url"] {
+        width: 100%;
+        max-width: 700px;
+        padding: 8px;
+        box-sizing: border-box;
+    }
+
+    .form-group.checkbox {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+        .form-group.checkbox label {
+            margin: 0;
+        }
+
+.field-validation-error,
+.validation-summary-errors {
+    color: #b00020;
+}

@@ -1,0 +1,44 @@
+﻿@model IReadOnlyCollection<Damper.Domain.Integrations.Integration>
+
+@{
+    ViewData["Title"] = "Integrations";
+}
+
+<h1>Integrations</h1>
+
+<div class="actions">
+    <a class="button" href="/admin/integrations/create">Create Integration</a>
+</div>
+
+@if (Model.Count == 0)
+{
+    <p>No integrations have been configured.</p>
+}
+else
+{
+    <table>
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Enabled</th>
+                <th>Destination</th>
+                <th>Modified</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var integration in Model)
+            {
+                <tr>
+                    <td>@integration.Name</td>
+                    <td>@(integration.Enabled ? "Yes" : "No")</td>
+                    <td>@integration.Delivery.Destination.Uri</td>
+                    <td>@integration.ModifiedUtc.ToLocalTime().ToString("g")</td>
+                    <td>
+                        <a href="/admin/integrations/edit/@integration.Id">Edit</a>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}

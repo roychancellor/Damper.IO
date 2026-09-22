@@ -107,6 +107,8 @@ try
             });
         });
 
+    builder.Services.AddControllersWithViews();
+
     bootstrapLogger.Info($"BUILDING APPLICATION");
     var app = builder.Build();
     
@@ -120,7 +122,8 @@ try
     // Configure the HTTP request pipeline.
     Loggers.Application.Info($"Configuring HTTP request pipeline");
     app.UseHttpsRedirection();
-    
+    app.UseStaticFiles();
+
     Loggers.Application.Info($"Defining minimal API - MapPost");
     app.MapPost("v1/inbound", async (
         HttpContext context,
@@ -154,6 +157,9 @@ try
                                                            statusCode: StatusCodes.Status500InternalServerError)
             };
     });
+
+    // ADMINISTRATIVE UI METHODS
+    app.MapControllerRoute(name: "admin", pattern: "admin/{controller=Integrations}/{action=Index}/{id?}");
 
     // DEVELOPMENT USE ONLY
     if (app.Environment.IsDevelopment() && app.Configuration.GetValue<bool>("SeedDevelopmentData"))

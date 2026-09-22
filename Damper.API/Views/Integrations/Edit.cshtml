@@ -1,0 +1,52 @@
+﻿@model Damper.API.ViewModels.Integrations.IntegrationEditModel
+
+@{
+    ViewData["Title"] = "Edit Integration";
+}
+
+<h1>Edit Integration</h1>
+
+<p>
+    <a href="/admin/integrations">← Back to Integrations</a>
+</p>
+
+<form method="post">
+    <input asp-for="Id" type="hidden" />
+
+    <div asp-validation-summary="ModelOnly"></div>
+
+    <div class="form-group">
+        <label asp-for="Name"></label>
+        <input asp-for="Name" />
+        <span asp-validation-for="Name"></span>
+    </div>
+
+    <div class="form-group">
+        <label asp-for="Description"></label>
+        <input asp-for="Description" />
+    </div>
+
+    <div class="form-group checkbox">
+        <input asp-for="Enabled" />
+        <label asp-for="Enabled">Integration Enabled</label>
+    </div>
+
+    <div class="form-group checkbox">
+        <input asp-for="IngressEnabled" />
+        <label asp-for="IngressEnabled">Ingress Enabled</label>
+    </div>
+
+    <div class="form-group checkbox">
+        <input asp-for="DeliveryEnabled" />
+        <label asp-for="DeliveryEnabled">Delivery Enabled</label>
+    </div>
+
+    <div class="form-group">
+        <label asp-for="DestinationUri">Destination URI</label>
+        <input asp-for="DestinationUri" />
+        <span asp-validation-for="DestinationUri"></span>
+    </div>
+
+    <button class="button" type="submit">Save</button>
+    <a href="/admin/integrations">Cancel</a>
+</form>
