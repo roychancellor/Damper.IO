@@ -180,7 +180,48 @@ public sealed class IntegrationsController : Controller
             }
         };
 
-        await _integrationService.SaveAsync(integration, cancellationToken);
+        try
+        {
+            await _integrationService.SaveAsync(integration, cancellationToken);
+        }
+        catch (DuplicateApiKeyException)
+        {
+            ModelState.AddModelError(nameof(model.ApiKey), "This API key is already in use.");
+
+            return View(model);
+        }
+        catch (Exception)
+        {
+            throw;
+        }
+
+        return RedirectToAction(nameof(Index));
+    }
+
+    public async Task<IActionResult> Delete(long id, CancellationToken cancellationToken)
+    {
+        var integration = await _integrationService.GetByIdAsync(id, cancellationToken);
+
+        if (integration == null)
+        {
+            return NotFound();
+        }
+
+        return View(integration);
+    }
+
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> DeleteConfirmed(long id, CancellationToken cancellationToken)
+    {
+        var integration = await _integrationService.GetByIdAsync(id, cancellationToken);
+
+        if (integration == null)
+        {
+            return NotFound();
+        }
+
+        await _integrationService.DeleteAsync(id, cancellationToken);
 
         return RedirectToAction(nameof(Index));
     }

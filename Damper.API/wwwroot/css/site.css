@@ -117,3 +117,18 @@ a {
 .disabled-row {
     opacity: 0.55;
 }
+
+.warning {
+    margin: 20px 0;
+    padding: 15px;
+    background: #fff3cd;
+    border: 1px solid #ffe69c;
+}
+
+.delete-form {
+    margin-top: 20px;
+}
+
+.button.danger {
+    background: #b42318;
+}
