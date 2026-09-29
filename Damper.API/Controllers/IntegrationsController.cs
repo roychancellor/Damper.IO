@@ -225,4 +225,71 @@ public sealed class IntegrationsController : Controller
 
         return RedirectToAction(nameof(Index));
     }
+
+    public async Task<IActionResult> RotateApiKey(long id, CancellationToken cancellationToken)
+    {
+        var integration = await _integrationService.GetByIdAsync(id, cancellationToken);
+
+        if (integration == null)
+        {
+            return NotFound();
+        }
+
+        var model = new IntegrationApiKeyModel
+        {
+            Id = integration.Id,
+            IntegrationName = integration.Name.ToString()
+        };
+
+        return View(model);
+    }
+
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> RotateApiKey(IntegrationApiKeyModel model, CancellationToken cancellationToken)
+    {
+        if (!ModelState.IsValid)
+        {
+            return View(model);
+        }
+
+        var existing = await _integrationService.GetByIdAsync(model.Id, cancellationToken);
+
+        if (existing == null)
+        {
+            return NotFound();
+        }
+
+        var updated = new Integration
+        {
+            Id = existing.Id,
+            Name = existing.Name,
+            Description = existing.Description,
+            Enabled = existing.Enabled,
+
+            Ingress = new Ingress
+            {
+                Enabled = existing.Ingress.Enabled,
+                ApiKeyHash = new ApiKey(model.ApiKey).ToHash()
+            },
+
+            Delivery = existing.Delivery,
+
+            CreatedUtc = existing.CreatedUtc,
+            ModifiedUtc = existing.ModifiedUtc
+        };
+
+        try
+        {
+            await _integrationService.SaveAsync(updated, cancellationToken);
+        }
+        catch (DuplicateApiKeyException)
+        {
+            ModelState.AddModelError(nameof(model.ApiKey), "This API key is already in use.");
+
+            return View(model);
+        }
+
+        return RedirectToAction(nameof(Edit), new { id = model.Id });
+    }
 }
