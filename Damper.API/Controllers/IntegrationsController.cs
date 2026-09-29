@@ -2,6 +2,8 @@
 using Damper.Application.Integrations;
 using Damper.Domain.Common;
 using Damper.Domain.Integrations;
+using Damper.Domain.Integrations.OutAuthentication;
+using Damper.Infrastructure.Security;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Damper.API.Controllers;
@@ -128,6 +130,57 @@ public sealed class IntegrationsController : Controller
         };
 
         await _integrationService.SaveAsync(updated, cancellationToken);
+
+        return RedirectToAction(nameof(Index));
+    }
+
+    public IActionResult Create()
+    {
+        return View(new IntegrationCreateModel());
+    }
+
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> Create(IntegrationCreateModel model, CancellationToken cancellationToken)
+    {
+        if (!ModelState.IsValid)
+        {
+            return View(model);
+        }
+
+        if (!Uri.TryCreate(model.DestinationUri, UriKind.Absolute, out var destinationUri))
+        {
+            ModelState.AddModelError(nameof(model.DestinationUri), "Destination URI must be a valid absolute URI.");
+
+            return View(model);
+        }
+
+        var integration = new Integration
+        {
+            Name = new IntegrationName(model.Name),
+            Description = model.Description,
+            Enabled = model.Enabled,
+
+            Ingress = new Ingress
+            {
+                Enabled = model.IngressEnabled,
+                ApiKeyHash = new ApiKey(model.ApiKey).ToHash()
+            },
+
+            Delivery = new Delivery
+            {
+                Enabled = model.DeliveryEnabled,
+                Destination = new Destination
+                {
+                    Uri = destinationUri
+                },
+                Authentication = new NoAuthentication(),
+                Headers = new HeaderCollection(),
+                Settings = new DeliverySettings()
+            }
+        };
+
+        await _integrationService.SaveAsync(integration, cancellationToken);
 
         return RedirectToAction(nameof(Index));
     }
