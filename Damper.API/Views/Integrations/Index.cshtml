@@ -29,13 +29,26 @@ else
         <tbody>
             @foreach (var integration in Model)
             {
-                <tr>
+                <tr class="@(integration.Enabled ? "" : "disabled-row")">
                     <td>@integration.Name</td>
                     <td>@(integration.Enabled ? "Yes" : "No")</td>
                     <td>@integration.Delivery.Destination.Uri</td>
                     <td>@integration.ModifiedUtc.ToLocalTime().ToString("g")</td>
                     <td>
                         <a href="/admin/integrations/edit/@integration.Id">Edit</a>
+
+                        <span> | </span>
+
+                        <form asp-action="SetEnabled" method="post" style="display:inline">
+                            <input type="hidden" name="id" value="@integration.Id" />
+                            <input type="hidden"
+                                   name="enabled"
+                                   value="@(integration.Enabled ? "false" : "true")" />
+
+                            <button type="submit" class="link-button">
+                                @(integration.Enabled ? "Disable" : "Enable")
+                            </button>
+                        </form>
                     </td>
                 </tr>
             }

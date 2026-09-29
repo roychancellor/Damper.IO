@@ -103,4 +103,32 @@ public sealed class IntegrationsController : Controller
 
         return RedirectToAction(nameof(Index));
     }
+
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> SetEnabled(long id, bool enabled, CancellationToken cancellationToken)
+    {
+        var existing = await _integrationService.GetByIdAsync(id, cancellationToken);
+
+        if (existing == null)
+        {
+            return NotFound();
+        }
+
+        var updated = new Integration
+        {
+            Id = existing.Id,
+            Name = existing.Name,
+            Description = existing.Description,
+            Enabled = enabled,
+            Ingress = existing.Ingress,
+            Delivery = existing.Delivery,
+            CreatedUtc = existing.CreatedUtc,
+            ModifiedUtc = existing.ModifiedUtc
+        };
+
+        await _integrationService.SaveAsync(updated, cancellationToken);
+
+        return RedirectToAction(nameof(Index));
+    }
 }

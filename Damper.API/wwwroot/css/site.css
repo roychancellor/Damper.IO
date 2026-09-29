@@ -103,3 +103,17 @@ a {
 .validation-summary-errors {
     color: #b00020;
 }
+
+.link-button {
+    border: 0;
+    background: none;
+    padding: 0;
+    color: #1264a3;
+    text-decoration: underline;
+    cursor: pointer;
+    font: inherit;
+}
+
+.disabled-row {
+    opacity: 0.55;
+}
