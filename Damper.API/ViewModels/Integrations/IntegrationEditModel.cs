@@ -20,4 +20,28 @@ public sealed class IntegrationEditModel
     [Required]
     [Url]
     public string DestinationUri { get; set; } = string.Empty;
+
+    [Range(1, int.MaxValue)]
+    public int RequestsPerInterval { get; set; }
+
+    [Range(1, int.MaxValue)]
+    public int DeliveryIntervalMillis { get; set; }
+
+    [Range(0, int.MaxValue)]
+    public int MaxRetryAttempts { get; set; }
+
+    [Range(1, int.MaxValue)]
+    public int InitialRetryDelayMillis { get; set; }
+
+    [Range(1.0, 100.0)]
+    public double RetryBackoffMultiplier { get; set; }
+
+    [Range(1, long.MaxValue)]
+    public long MaximumRetryDelayMillis { get; set; }
+
+    [Range(1, int.MaxValue)]
+    public int RequestTimeoutMillis { get; set; }
+
+    [Range(1, int.MaxValue)]
+    public int MaxQueueCapacity { get; set; }
 }

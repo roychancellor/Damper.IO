@@ -49,6 +49,56 @@
         <span asp-validation-for="DestinationUri"></span>
     </div>
 
+    <h2>Delivery Settings</h2>
+
+    <div class="form-group">
+        <label asp-for="RequestsPerInterval">Requests Per Interval</label>
+        <input asp-for="RequestsPerInterval" type="number" />
+        <span asp-validation-for="RequestsPerInterval"></span>
+    </div>
+
+    <div class="form-group">
+        <label asp-for="DeliveryIntervalMillis">Delivery Interval (ms)</label>
+        <input asp-for="DeliveryIntervalMillis" type="number" />
+        <span asp-validation-for="DeliveryIntervalMillis"></span>
+    </div>
+
+    <div class="form-group">
+        <label asp-for="MaxRetryAttempts">Max Retry Attempts</label>
+        <input asp-for="MaxRetryAttempts" type="number" />
+        <span asp-validation-for="MaxRetryAttempts"></span>
+    </div>
+
+    <div class="form-group">
+        <label asp-for="InitialRetryDelayMillis">Initial Retry Delay (ms)</label>
+        <input asp-for="InitialRetryDelayMillis" type="number" />
+        <span asp-validation-for="InitialRetryDelayMillis"></span>
+    </div>
+
+    <div class="form-group">
+        <label asp-for="RetryBackoffMultiplier">Retry Backoff Multiplier</label>
+        <input asp-for="RetryBackoffMultiplier" type="number" step="0.1" />
+        <span asp-validation-for="RetryBackoffMultiplier"></span>
+    </div>
+
+    <div class="form-group">
+        <label asp-for="MaximumRetryDelayMillis">Maximum Retry Delay (ms)</label>
+        <input asp-for="MaximumRetryDelayMillis" type="number" />
+        <span asp-validation-for="MaximumRetryDelayMillis"></span>
+    </div>
+
+    <div class="form-group">
+        <label asp-for="RequestTimeoutMillis">Request Timeout (ms)</label>
+        <input asp-for="RequestTimeoutMillis" type="number" />
+        <span asp-validation-for="RequestTimeoutMillis"></span>
+    </div>
+
+    <div class="form-group">
+        <label asp-for="MaxQueueCapacity">Max Queue Capacity</label>
+        <input asp-for="MaxQueueCapacity" type="number" />
+        <span asp-validation-for="MaxQueueCapacity"></span>
+    </div>
+
     <button class="button" type="submit">Save</button>
     <a href="/admin/integrations">Cancel</a>
 </form>

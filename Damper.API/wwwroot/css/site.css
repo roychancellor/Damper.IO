@@ -132,3 +132,9 @@ a {
 .button.danger {
     background: #b42318;
 }
+
+.form-group input[type="number"] {
+    width: 220px;
+    padding: 8px;
+    box-sizing: border-box;
+}

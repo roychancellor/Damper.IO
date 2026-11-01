@@ -41,7 +41,17 @@ public sealed class IntegrationsController : Controller
             Enabled = integration.Enabled,
             IngressEnabled = integration.Ingress.Enabled,
             DeliveryEnabled = integration.Delivery.Enabled,
-            DestinationUri = integration.Delivery.Destination.Uri.ToString()
+            DestinationUri = integration.Delivery.Destination.Uri.ToString(),
+
+            // Delivery settings
+            RequestsPerInterval = integration.Delivery.Settings.RequestsPerInterval,
+            DeliveryIntervalMillis = integration.Delivery.Settings.DeliveryIntervalMillis,
+            MaxRetryAttempts = integration.Delivery.Settings.MaxRetryAttempts,
+            InitialRetryDelayMillis = integration.Delivery.Settings.InitialRetryDelayMillis,
+            RetryBackoffMultiplier = integration.Delivery.Settings.RetryBackoffMultiplier,
+            MaximumRetryDelayMillis = integration.Delivery.Settings.MaximumRetryDelayMillis,
+            RequestTimeoutMillis = integration.Delivery.Settings.RequestTimeoutMillis,
+            MaxQueueCapacity = integration.Delivery.Settings.MaxQueueCapacity
         };
 
         return View(model);
@@ -92,7 +102,18 @@ public sealed class IntegrationsController : Controller
                     Uri = destinationUri
                 },
 
-                Settings = existing.Delivery.Settings,
+                Settings = new DeliverySettings
+                {
+                    RequestsPerInterval = model.RequestsPerInterval,
+                    DeliveryIntervalMillis = model.DeliveryIntervalMillis,
+                    MaxRetryAttempts = model.MaxRetryAttempts,
+                    InitialRetryDelayMillis = model.InitialRetryDelayMillis,
+                    RetryBackoffMultiplier = model.RetryBackoffMultiplier,
+                    MaximumRetryDelayMillis = model.MaximumRetryDelayMillis,
+                    RequestTimeoutMillis = model.RequestTimeoutMillis,
+                    MaxQueueCapacity = model.MaxQueueCapacity
+                },
+
                 Authentication = existing.Delivery.Authentication,
                 Headers = existing.Delivery.Headers
             },
