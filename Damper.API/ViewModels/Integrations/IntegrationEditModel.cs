@@ -1,4 +1,5 @@
-﻿using System.ComponentModel.DataAnnotations;
+﻿using Damper.Domain.Enums;
+using System.ComponentModel.DataAnnotations;
 
 namespace Damper.API.ViewModels.Integrations;
 
@@ -44,4 +45,13 @@ public sealed class IntegrationEditModel
 
     [Range(1, int.MaxValue)]
     public int MaxQueueCapacity { get; set; }
+
+    // Authentication properties
+    public AuthenticationType AuthenticationType { get; set; }
+
+    public string? AuthenticationUsername { get; set; }
+
+    public string? AuthenticationSecret { get; set; }
+
+    public string? AuthenticationHeaderName { get; set; }
 }

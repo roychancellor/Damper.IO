@@ -99,6 +99,44 @@
         <span asp-validation-for="MaxQueueCapacity"></span>
     </div>
 
+    <h2>Outbound Authentication</h2>
+
+    <div class="form-group">
+        <label asp-for="AuthenticationType">Authentication Type</label>
+        <select asp-for="AuthenticationType"
+                asp-items="Html.GetEnumSelectList<AuthenticationType>()">
+        </select>
+    </div>
+
+    <div class="form-group">
+        <label asp-for="AuthenticationUsername">Username</label>
+        <input asp-for="AuthenticationUsername" />
+        <span asp-validation-for="AuthenticationUsername"></span>
+        <small>Used only for Basic authentication.</small>
+    </div>
+
+    <div class="form-group">
+        <label asp-for="AuthenticationHeaderName">Header Name</label>
+        <input asp-for="AuthenticationHeaderName" />
+        <span asp-validation-for="AuthenticationHeaderName"></span>
+        <small>Used only for Custom Header authentication.</small>
+    </div>
+
+    <div class="form-group">
+        <label asp-for="AuthenticationSecret">New Secret</label>
+
+        <input id="AuthenticationSecret"
+               name="AuthenticationSecret"
+               type="password"
+               autocomplete="new-password" />
+
+        <span asp-validation-for="AuthenticationSecret"></span>
+
+        <small>
+            Leave blank to keep the existing secret when the authentication type is unchanged.
+        </small>
+    </div>
+
     <button class="button" type="submit">Save</button>
     <a href="/admin/integrations">Cancel</a>
 </form>
