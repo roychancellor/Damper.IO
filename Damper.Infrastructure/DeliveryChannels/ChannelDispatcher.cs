@@ -340,6 +340,10 @@ namespace Damper.Infrastructure.DeliveryChannels
 
             foreach (var ch in integration.Delivery.Headers.Headers)
             {
+                if (OutboundHeaderPolicy.IsReserved(ch.Key))
+                {
+                    continue;
+                }
                 httpRequest.Headers.TryAddWithoutValidation(ch.Key, ch.Value);
             }
         }

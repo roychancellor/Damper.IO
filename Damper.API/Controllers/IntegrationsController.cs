@@ -4,6 +4,7 @@ using Damper.Domain.Common;
 using Damper.Domain.Enums;
 using Damper.Domain.Integrations;
 using Damper.Domain.Integrations.OutAuthentication;
+using Damper.Infrastructure.ReferenceData;
 using Damper.Infrastructure.Security;
 using Microsoft.AspNetCore.Mvc;
 
@@ -111,7 +112,7 @@ public sealed class IntegrationsController : Controller
         }
 
         var newHeaders = BuildHeaders(model);
-        if (newHeaders == null)
+        if (!ModelState.IsValid || newHeaders == null)
         {
             model.AuthenticationSecret = null;
             return View(model);
@@ -457,24 +458,44 @@ public sealed class IntegrationsController : Controller
     private HeaderCollection? BuildHeaders(IntegrationEditModel model)
     {
         var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
+        
+        var hasErrors = false;
         foreach (var header in model.Headers)
         {
             var name = header.Name?.Trim();
+            var value = header.Value?.Trim();
 
             if (string.IsNullOrWhiteSpace(name))
             {
                 ModelState.AddModelError(nameof(model.Headers), "Header name is required.");
+                hasErrors = true;
+                continue;
+            }
 
-                return null;
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                ModelState.AddModelError(nameof(model.Headers), "Header value is required.");
+                hasErrors = true;
+                continue;
+            }
+
+            if (OutboundHeaderPolicy.IsReserved(name))
+            {
+                ModelState.AddModelError(nameof(model.Headers), $"Header '{name}' is reserved by Damper and cannot be overridden.");
+                hasErrors = true;
+                continue;
             }
 
             if (!headers.TryAdd(name, header.Value ?? string.Empty))
             {
                 ModelState.AddModelError(nameof(model.Headers), $"Duplicate header '{name}'.");
-
-                return null;
+                hasErrors = true;
             }
+        }
+
+        if (hasErrors)
+        {
+            return null;
         }
 
         return new HeaderCollection
