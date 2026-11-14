@@ -137,6 +137,71 @@
         </small>
     </div>
 
+    <!-- Custom Outbound Headers -->
+    <h2>Custom Headers</h2>
+
+    <span asp-validation-for="Headers"></span>
+
+    <div id="headers">
+        @for (var i = 0; i < Model.Headers.Count; i++)
+        {
+            <div class="header-row">
+                <input asp-for="Headers[i].Name" placeholder="Header name" />
+                <input asp-for="Headers[i].Value" placeholder="Header value" />
+
+                <button type="button" class="link-button" onclick="removeHeader(this)">
+                    Remove
+                </button>
+            </div>
+        }
+    </div>
+
+    <button type="button"
+            class="button"
+            onclick="addHeader()">
+        Add Header
+    </button>
+
     <button class="button" type="submit">Save</button>
     <a href="/admin/integrations">Cancel</a>
 </form>
+
+<script>
+    function addHeader() {
+        const container = document.getElementById("headers");
+        const index = container.querySelectorAll(".header-row").length;
+
+        const row = document.createElement("div");
+        row.className = "header-row";
+
+        row.innerHTML = `
+            <input name="Headers[${index}].Name" placeholder="Header name" />
+
+            <input name="Headers[${index}].Value" placeholder="Header value" />
+
+            <button type="button"
+                    class="link-button"
+                    onclick="removeHeader(this)">
+                Remove
+            </button>
+        `;
+
+        container.appendChild(row);
+    }
+
+    function removeHeader(button) {
+        button.closest(".header-row").remove();
+        reindexHeaders();
+    }
+
+    function reindexHeaders() {
+        const rows = document.querySelectorAll(".header-row");
+
+        rows.forEach((row, index) => {
+            const inputs = row.querySelectorAll("input");
+
+            inputs[0].name = `Headers[${index}].Name`;
+            inputs[1].name = `Headers[${index}].Value`;
+        });
+    }
+</script>

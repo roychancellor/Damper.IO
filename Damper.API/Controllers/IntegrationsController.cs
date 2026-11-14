@@ -55,7 +55,15 @@ public sealed class IntegrationsController : Controller
             MaxQueueCapacity = integration.Delivery.Settings.MaxQueueCapacity,
 
             // Authentication settings
-            AuthenticationType = integration.Delivery.Authentication.Type
+            AuthenticationType = integration.Delivery.Authentication.Type,
+
+            // Custom outbound headers
+            Headers = integration.Delivery.Headers.Headers
+                                 .Select(header => new IntegrationHeaderModel
+                                 {
+                                    Name = header.Key,
+                                    Value = header.Value
+                                 }).ToList()
         };
 
         switch (integration.Delivery.Authentication)
@@ -96,14 +104,20 @@ public sealed class IntegrationsController : Controller
         }
 
         var newAuthentication = BuildAuthentication(model, existing.Delivery.Authentication);
-
         if (newAuthentication == null)
         {
             model.AuthenticationSecret = null;
             return View(model);
         }
 
-        var updated = new Integration
+        var newHeaders = BuildHeaders(model);
+        if (newHeaders == null)
+        {
+            model.AuthenticationSecret = null;
+            return View(model);
+        }
+
+        var newIntegration = new Integration
         {
             Id = existing.Id,
             Name = new IntegrationName(model.Name),
@@ -139,14 +153,14 @@ public sealed class IntegrationsController : Controller
 
                 Authentication = newAuthentication,
 
-                Headers = existing.Delivery.Headers
+                Headers = newHeaders
             },
 
             CreatedUtc = existing.CreatedUtc,
             ModifiedUtc = existing.ModifiedUtc
         };
 
-        await _integrationService.SaveAsync(updated, cancellationToken);
+        await _integrationService.SaveAsync(newIntegration, cancellationToken);
 
         return RedirectToAction(nameof(Index));
     }
@@ -438,6 +452,35 @@ public sealed class IntegrationsController : Controller
                                          "Unsupported authentication type.");
                 return null;
         }
+    }
+
+    private HeaderCollection? BuildHeaders(IntegrationEditModel model)
+    {
+        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var header in model.Headers)
+        {
+            var name = header.Name?.Trim();
+
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                ModelState.AddModelError(nameof(model.Headers), "Header name is required.");
+
+                return null;
+            }
+
+            if (!headers.TryAdd(name, header.Value ?? string.Empty))
+            {
+                ModelState.AddModelError(nameof(model.Headers), $"Duplicate header '{name}'.");
+
+                return null;
+            }
+        }
+
+        return new HeaderCollection
+        {
+            Headers = headers
+        };
     }
     #endregion
 }

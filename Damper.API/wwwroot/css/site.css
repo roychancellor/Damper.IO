@@ -138,3 +138,23 @@ a {
     padding: 8px;
     box-sizing: border-box;
 }
+
+/* Custom outbound headers */
+.header-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.header-row input {
+    padding: 8px;
+}
+
+.header-row input:first-child {
+    width: 220px;
+}
+
+.header-row input:nth-child(2) {
+    width: 400px;
+}

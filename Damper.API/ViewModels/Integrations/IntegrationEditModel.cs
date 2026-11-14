@@ -54,4 +54,7 @@ public sealed class IntegrationEditModel
     public string? AuthenticationSecret { get; set; }
 
     public string? AuthenticationHeaderName { get; set; }
+
+    // Custom Outbound Headers
+    public List<IntegrationHeaderModel> Headers { get; set; } = [];
 }
