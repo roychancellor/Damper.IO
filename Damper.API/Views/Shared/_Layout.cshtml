@@ -9,10 +9,25 @@
 <body>
     <header>
         <div class="container header">
-            <a class="brand" href="/admin/integrations">Damper</a>
-            <nav>
-                <a href="/admin/integrations">Integrations</a>
-            </nav>
+            <a class="brand" href="/admin">Damper</a>
+
+            @if (User.Identity?.IsAuthenticated == true)
+            {
+                <nav>
+                    <a href="/admin/integrations">Integrations</a>
+                </nav>
+
+                <div class="admin-account">
+                    <span>@User.Identity.Name</span>
+
+                    <form asp-controller="Admin"
+                          asp-action="Logout"
+                          method="post"
+                          class="logout-form">
+                        <button type="submit" class="logout-button">Logout</button>
+                    </form>
+                </div>
+            }
         </div>
     </header>
 

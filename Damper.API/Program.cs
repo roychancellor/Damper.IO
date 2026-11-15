@@ -1,3 +1,4 @@
+using Damper.API.Security;
 using Damper.API.Startup;
 using Damper.Application.Integrations;
 using Damper.Core.IngestionService;
@@ -10,6 +11,8 @@ using Damper.Infrastructure.Logging;
 using Damper.Infrastructure.MessageTransport;
 using Damper.Infrastructure.ReferenceData;
 using Damper.Infrastructure.Security;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.ObjectPool;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Primitives;
@@ -42,6 +45,41 @@ try
     builder.Host.UseNLog();
     
     bootstrapLogger.Info($"Adding services to builder");
+
+    // ADMIN UI AUTHENTICATION SERVICES
+    var adminAuthenticationSection = builder.Configuration.GetSection("AdminAuthentication");
+    builder.Services.AddOptions<AdminAuthenticationOptions>()
+                    .Bind(adminAuthenticationSection)
+                    .Validate(options => !string.IsNullOrWhiteSpace(options.Username), "Admin authentication username is required.")
+                    .Validate(options => !string.IsNullOrWhiteSpace(options.PasswordHash), "Admin authentication password hash is required.")
+                    .ValidateOnStart();
+    builder.Services.AddSingleton<IPasswordHasher<AdminAuthenticationResult>, PasswordHasher<AdminAuthenticationResult>>();
+    builder.Services.AddSingleton<IAdminCredentialValidator, ConfiguredAdminCredentialValidator>();
+
+    builder.Services
+           .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+           .AddCookie(options =>
+           {
+               options.LoginPath = "/admin/login";
+               options.LogoutPath = "/admin/logout";
+               options.Cookie.Name = "Damper.Admin";
+               options.Cookie.HttpOnly = true;
+               options.Cookie.SameSite = SameSiteMode.Strict;
+               options.Cookie.SecurePolicy = builder.Environment.IsDevelopment()
+                                           ? CookieSecurePolicy.SameAsRequest
+                                           : CookieSecurePolicy.Always;
+               options.SlidingExpiration = true;
+               options.ExpireTimeSpan = TimeSpan.FromHours(8);
+           });
+
+    builder.Services.AddAuthorizationBuilder()
+           .AddPolicy("DamperAdmin", policy =>
+           {
+               policy.RequireAuthenticatedUser();
+               policy.RequireRole(AdminRoles.Administrator);
+           });
+
+    // DAMPER SERVICES
     builder.Services.AddRepositories()
                     .AddRabbitMqInfrastructure()
                     .AddQueuePublishing()
@@ -117,12 +155,19 @@ try
     Loggers.Initialize(loggerFactory);
 
     Loggers.Application.Info($"Setting middleware");
+
     app.UseMiddleware<CorrelationIdMiddleware>();
     
     // Configure the HTTP request pipeline.
     Loggers.Application.Info($"Configuring HTTP request pipeline");
     app.UseHttpsRedirection();
     app.UseStaticFiles();
+
+    app.UseRouting();
+
+    // Authentication and Authorization middleware need to be at the top of the pipeline
+    app.UseAuthentication();
+    app.UseAuthorization();
 
     Loggers.Application.Info($"Defining minimal API - MapPost");
     app.MapPost("v1/inbound", async (

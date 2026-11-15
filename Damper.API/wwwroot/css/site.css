@@ -158,3 +158,30 @@ a {
 .header-row input:nth-child(2) {
     width: 400px;
 }
+
+/* Login/logout */
+.admin-account {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: #ddd;
+}
+
+.logout-form {
+    margin: 0;
+}
+
+.logout-button {
+    padding: 6px 12px;
+    border: 1px solid #666;
+    border-radius: 4px;
+    background: #333;
+    color: white;
+    cursor: pointer;
+    font: inherit;
+}
+
+    .logout-button:hover {
+        background: #444;
+    }

@@ -6,10 +6,12 @@ using Damper.Domain.Integrations;
 using Damper.Domain.Integrations.OutAuthentication;
 using Damper.Infrastructure.ReferenceData;
 using Damper.Infrastructure.Security;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Damper.API.Controllers;
 
+[Authorize(Policy = "DamperAdmin")]
 public sealed class IntegrationsController : Controller
 {
     private readonly IIntegrationService _integrationService;
