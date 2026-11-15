@@ -12,6 +12,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace Damper.API.Controllers;
 
 [Authorize(Policy = "DamperAdmin")]
+[AutoValidateAntiforgeryToken]
 public sealed class IntegrationsController : Controller
 {
     private readonly IIntegrationService _integrationService;
@@ -84,7 +85,6 @@ public sealed class IntegrationsController : Controller
     }
 
     [HttpPost]
-    [ValidateAntiForgeryToken]
     public async Task<IActionResult> Edit(IntegrationEditModel model, CancellationToken cancellationToken)
     {
         if (!ModelState.IsValid)
@@ -169,7 +169,6 @@ public sealed class IntegrationsController : Controller
     }
 
     [HttpPost]
-    [ValidateAntiForgeryToken]
     public async Task<IActionResult> SetEnabled(long id, bool enabled, CancellationToken cancellationToken)
     {
         var existing = await _integrationService.GetByIdAsync(id, cancellationToken);
@@ -202,7 +201,6 @@ public sealed class IntegrationsController : Controller
     }
 
     [HttpPost]
-    [ValidateAntiForgeryToken]
     public async Task<IActionResult> Create(IntegrationCreateModel model, CancellationToken cancellationToken)
     {
         if (!ModelState.IsValid)
@@ -273,7 +271,6 @@ public sealed class IntegrationsController : Controller
     }
 
     [HttpPost]
-    [ValidateAntiForgeryToken]
     public async Task<IActionResult> DeleteConfirmed(long id, CancellationToken cancellationToken)
     {
         var integration = await _integrationService.GetByIdAsync(id, cancellationToken);
@@ -307,7 +304,6 @@ public sealed class IntegrationsController : Controller
     }
 
     [HttpPost]
-    [ValidateAntiForgeryToken]
     public async Task<IActionResult> RotateApiKey(IntegrationApiKeyModel model, CancellationToken cancellationToken)
     {
         if (!ModelState.IsValid)

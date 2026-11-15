@@ -9,6 +9,7 @@ using System.Security.Claims;
 namespace Damper.API.Controllers;
 
 [Route("admin")]
+[AutoValidateAntiforgeryToken]
 public sealed class AdminController(IAdminCredentialValidator credentialValidator) : Controller
 {
     [AllowAnonymous]
@@ -20,7 +21,6 @@ public sealed class AdminController(IAdminCredentialValidator credentialValidato
 
     [AllowAnonymous]
     [HttpPost("login")]
-    [ValidateAntiForgeryToken]
     public async Task<IActionResult> Login(AdminLoginModel model, CancellationToken cancellationToken)
     {
         var result = await credentialValidator.ValidateAsync(
@@ -53,7 +53,6 @@ public sealed class AdminController(IAdminCredentialValidator credentialValidato
 
     [Authorize(Policy = "DamperAdmin")]
     [HttpPost("logout")]
-    [ValidateAntiForgeryToken]
     public async Task<IActionResult> Logout()
     {
         await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
