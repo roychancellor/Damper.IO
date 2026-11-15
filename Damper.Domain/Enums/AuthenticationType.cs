@@ -1,10 +1,10 @@
 namespace Damper.Domain.Enums
 {
     public enum AuthenticationType
-{
-    None,
-    Basic,
-    Bearer,
-    CustomHeader
-}
+    {
+        None,
+        Basic,
+        Bearer,
+        CustomHeader
+    }
 }

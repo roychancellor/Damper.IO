@@ -1,16 +1,20 @@
-using System.Net;
-using System.Net.Http.Headers;
-using System.Threading.Channels;
 using Damper.Application.Integrations;
 using Damper.Domain.Integrations;
+using Damper.Domain.Integrations.OutAuthentication;
 using Damper.Infrastructure.Logging;
 using Damper.Infrastructure.MessageTransport;
 using Damper.Infrastructure.Observability;
 using Damper.Infrastructure.ReferenceData;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.ObjectPool;
 using Microsoft.Extensions.Options;
+using Microsoft.VisualBasic;
+using System.Net;
+using System.Net.Http.Headers;
+using System.Text;
+using System.Threading.Channels;
 
 namespace Damper.Infrastructure.DeliveryChannels
 {
@@ -186,6 +190,8 @@ namespace Damper.Infrastructure.DeliveryChannels
                         return KEEP_ALIVE; // Keep the pipeline loop alive
                     }
                     httpRequest.AddDamperHeaders(envelope);
+                    httpRequest.AddCustomOutboundHeaders(integration);
+                    httpRequest.AddOutboundAuthenticationHeaders(integration);
 
                     try
                     {
@@ -319,6 +325,48 @@ namespace Damper.Infrastructure.DeliveryChannels
         {
             cts.CancelAfter(TimeSpan.FromMilliseconds(timeoutMillis));
             return cts;
+        }
+
+        public static void AddCustomOutboundHeaders(this HttpRequestMessage httpRequest, Integration integration)
+        {
+            if (integration == null ||
+                integration.Delivery == null ||
+                integration.Delivery.Headers == null ||
+                integration.Delivery.Headers.Headers == null ||
+                integration.Delivery.Headers.Headers.Count == 0)
+            {
+                return;
+            }
+
+            foreach (var ch in integration.Delivery.Headers.Headers)
+            {
+                if (OutboundHeaderPolicy.IsReserved(ch.Key))
+                {
+                    continue;
+                }
+                httpRequest.Headers.TryAddWithoutValidation(ch.Key, ch.Value);
+            }
+        }
+
+        public static void AddOutboundAuthenticationHeaders(this HttpRequestMessage httpRequest, Integration integration)
+        {
+            switch (integration.Delivery.Authentication)
+            {
+                case NoAuthentication: return;
+
+                case BasicAuthentication basic:
+                    var credentials = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{basic.Username}:{basic.Password.Reveal()}"));
+                    httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Basic", credentials);
+                    return;
+                
+                case BearerAuthentication bearer:
+                    httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer.Token.Reveal());
+                    return;
+
+                case CustomHeaderAuthentication custom:
+                    httpRequest.Headers.TryAddWithoutValidation(custom.HeaderName, custom.HeaderValue.Reveal());
+                    return;
+            }
         }
     }
 }

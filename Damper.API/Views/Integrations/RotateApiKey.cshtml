@@ -1,0 +1,37 @@
+﻿@model Damper.API.ViewModels.Integrations.IntegrationApiKeyModel
+
+@{
+    ViewData["Title"] = "Rotate API Key";
+}
+
+<h1>Rotate API Key</h1>
+
+<p>
+    <a href="/admin/integrations/edit/@Model.Id">← Back to Integration</a>
+</p>
+
+<div class="warning">
+    <strong>Rotating the API key immediately invalidates the existing key.</strong>
+    <p>
+        The current key cannot be displayed or recovered. Make sure the sender
+        is updated with the new key.
+    </p>
+</div>
+
+<h3>@Model.IntegrationName</h3>
+
+<form method="post">
+    <input asp-for="Id" type="hidden" />
+    <input asp-for="IntegrationName" type="hidden" />
+
+    <div asp-validation-summary="ModelOnly"></div>
+
+    <div class="form-group">
+        <label asp-for="ApiKey">New API Key</label>
+        <input asp-for="ApiKey" autocomplete="off" />
+        <span asp-validation-for="ApiKey"></span>
+    </div>
+
+    <button class="button" type="submit">Rotate API Key</button>
+    <a href="/admin/integrations/edit/@Model.Id">Cancel</a>
+</form>

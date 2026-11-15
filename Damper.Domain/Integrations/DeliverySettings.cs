@@ -1,21 +1,23 @@
 namespace Damper.Domain.Integrations
 {
+    // Properties have what we consider "sensible" defaults which
+    // the Admin UI will be able to override.
     public sealed class DeliverySettings
     {
-        public int RequestsPerInterval { get; init; }
-        
-        public int DeliveryIntervalMillis { get; set; }
+        public int RequestsPerInterval { get; init; } = 10;
 
-        public int MaxRetryAttempts { get; init; }
+        public int DeliveryIntervalMillis { get; set; } = 1000;
 
-        public int InitialRetryDelayMillis { get; init; }
+        public int MaxRetryAttempts { get; init; } = 5;
 
-        public double RetryBackoffMultiplier { get; init; }
+        public int InitialRetryDelayMillis { get; init; } = 1000;
 
-        public long MaximumRetryDelayMillis { get; init; }
+        public double RetryBackoffMultiplier { get; init; } = 2.0;
 
-        public int RequestTimeoutMillis { get; init; }
-        
-        public int MaxQueueCapacity { get; set; }
+        public long MaximumRetryDelayMillis { get; init; } = 30000;
+
+        public int RequestTimeoutMillis { get; init; } = 10000;
+
+        public int MaxQueueCapacity { get; set; } = 1000;
     }
 }

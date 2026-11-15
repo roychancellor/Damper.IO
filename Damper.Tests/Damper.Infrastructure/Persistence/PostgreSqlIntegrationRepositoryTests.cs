@@ -1,3 +1,4 @@
+using Damper.Application.Integrations;
 using Damper.Domain.Common;
 using Damper.Domain.Integrations;
 using Damper.Domain.Integrations.OutAuthentication;
@@ -197,10 +198,8 @@ public sealed class PostgreSqlIntegrationRepositoryTests
 
         await _repository.SaveAsync(CreateIntegration(apiKeyHash: apiKeyHash), TestContext.CancellationToken);
 
-        var exception = await Assert.ThrowsExactlyAsync<PostgresException>(
+        var exception = await Assert.ThrowsExactlyAsync<DuplicateApiKeyException>(
             () => _repository.SaveAsync(CreateIntegration(apiKeyHash: apiKeyHash), TestContext.CancellationToken));
-
-        Assert.AreEqual(PostgresErrorCodes.UniqueViolation, exception.SqlState);
     }
 
     [TestMethod]

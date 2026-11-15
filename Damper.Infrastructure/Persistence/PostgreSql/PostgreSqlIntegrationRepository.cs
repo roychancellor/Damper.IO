@@ -115,23 +115,35 @@ public sealed class PostgreSqlIntegrationRepository : IIntegrationRepository
 
     private async Task<Integration> InsertAsync(Integration integration, string configuration, CancellationToken cancellationToken)
     {
-        await using var connection = CreateConnection();
+        try
+        {
+            await using var connection = CreateConnection();
 
-        var command = new CommandDefinition(
-            InsertSql,
-            new
-            {
-                p_name = integration.Name.ToString(),
-                p_enabled = integration.Enabled,
-                p_api_key_hash = integration.Ingress.ApiKeyHash.ToArray(),
-                p_configuration = configuration
-            },
-            cancellationToken: cancellationToken);
+            var command = new CommandDefinition(
+                InsertSql,
+                new
+                {
+                    p_name = integration.Name.ToString(),
+                    p_enabled = integration.Enabled,
+                    p_api_key_hash = integration.Ingress.ApiKeyHash.ToArray(),
+                    p_configuration = configuration
+                },
+                cancellationToken: cancellationToken);
 
-        var record = await connection.QuerySingleAsync<IntegrationRecord>(command);
-        var document = IntegrationDocument.FromJson(record.Configuration);
+            var record = await connection.QuerySingleAsync<IntegrationRecord>(command);
+            var document = IntegrationDocument.FromJson(record.Configuration);
 
-        return document.ToDomain(record, _secretProtector);
+            return document.ToDomain(record, _secretProtector);
+        }
+        catch (PostgresException ex)
+        when  (ex.SqlState == PostgresErrorCodes.UniqueViolation && ex.ConstraintName == "uq_integration_api_key_hash")
+        {
+            throw new DuplicateApiKeyException(ex);
+        }
+        catch (Exception)
+        {
+            throw;
+        }
     }
 
     private async Task<Integration> UpdateAsync(Integration integration, string configuration, CancellationToken cancellationToken)
