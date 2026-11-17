@@ -7,5 +7,6 @@
   <Project Path="Damper.Core/Damper.Core.csproj" />
   <Project Path="Damper.Domain/Damper.Domain.csproj" />
   <Project Path="Damper.Infrastructure/Damper.Infrastructure.csproj" />
+  <Project Path="Damper.Setup/Damper.Setup.csproj" Id="326c818d-4d6a-42e6-b1f9-e83cf901126c" />
   <Project Path="Damper.Tests/Damper.Tests.csproj" />
 </Solution>

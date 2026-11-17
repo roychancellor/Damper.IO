@@ -1,6 +1,7 @@
 using Damper.Application.Integrations;
 using Damper.Domain.Common;
 using Damper.Domain.Integrations;
+using Damper.Infrastructure.Extensions;
 using Damper.Infrastructure.ReferenceData;
 using Damper.Infrastructure.Security;
 using Dapper;
@@ -28,16 +29,7 @@ public sealed class PostgreSqlIntegrationRepository : IIntegrationRepository
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(secretProtector);
 
-        var settings = options.Value.RepositorySettings;
-
-        _connectionString = new NpgsqlConnectionStringBuilder
-        {
-            Host = settings.HostName,
-            Port = settings.Port,
-            Database = settings.Database,
-            Username = settings.UserName,
-            Password = settings.Password
-        }.ConnectionString;
+        _connectionString = options.Value.RepositorySettings.BuildConnectionString();
 
         _secretProtector = secretProtector;
     }
