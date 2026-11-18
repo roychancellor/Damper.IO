@@ -8,6 +8,13 @@ public sealed class PostgreSqlInspector(PostgreSqlConnectionSettings settings)
 {
     public async Task InspectAsync(CancellationToken cancellationToken = default)
     {
+        Console.WriteLine("PostgreSQL");
+        Console.WriteLine("----------");
+        Console.WriteLine($"Host:     {settings.HostName}");
+        Console.WriteLine($"Port:     {settings.Port}");
+        Console.WriteLine($"Database: {settings.Database}");
+        Console.WriteLine($"User:     {settings.UserName}");
+
         await using var connection = new NpgsqlConnection(settings.BuildConnectionString());
         await connection.OpenAsync(cancellationToken);
 

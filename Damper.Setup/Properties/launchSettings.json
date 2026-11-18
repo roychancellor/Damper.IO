@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "Damper.Setup": {
+      "commandName": "Project",
+      "environmentVariables": {
+        "DOTNET_ENVIRONMENT": "Development"
+      }
+    }
+  }
+}

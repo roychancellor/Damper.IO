@@ -6,8 +6,9 @@ using Microsoft.Extensions.Options;
 
 var builder = Host.CreateApplicationBuilder(args);
 
+var setup = builder.Configuration.GetSection("Setup");
 builder.Services.AddOptions<SetupOptions>()
-                .Bind(builder.Configuration.GetSection("Setup"))
+                .Bind(setup)
                 .Validate(opt => !string.IsNullOrWhiteSpace(opt.PostgreSql.HostName), "PostgreSQL host is required.")
                 .Validate(opt => opt.PostgreSql.Port > 0, "PostgreSQL port is invalid.")
                 .Validate(opt => !string.IsNullOrWhiteSpace(opt.PostgreSql.Database), "PostgreSQL database is required.")
@@ -22,12 +23,26 @@ builder.Services.AddSingleton(sp =>
 
 using var host = builder.Build();
 
-var options = host.Services
-                  .GetRequiredService<IOptions<SetupOptions>>()
-                  .Value;
+try
+{
+    Console.WriteLine("Damper.Setup");
+    Console.WriteLine("------------");
+    Console.WriteLine($"Environment: {builder.Environment.EnvironmentName}\n");
 
-Console.WriteLine("Damper.Setup");
-Console.WriteLine("------------");
-Console.WriteLine($"Environment: {builder.Environment.EnvironmentName}");
+    var inspector = host.Services.GetRequiredService<PostgreSqlInspector>();
 
-return 0;
+    await inspector.InspectAsync();
+
+    Console.WriteLine();
+    Console.WriteLine("Setup inspection completed successfully.");
+
+    return 0;
+}
+catch (Exception ex)
+{
+    Console.Error.WriteLine();
+    Console.Error.WriteLine("Damper.Setup failed.");
+    Console.Error.WriteLine(ex.Message);
+
+    return 1;
+}
